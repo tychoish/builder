@@ -3,7 +3,7 @@
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (f "0.20.0") (builder-core "0.1.0") (builder-elisp "0.1.0"))
+;; Package-Requires: ((emacs "29.1") (f "0.20.0"))
 ;; Keywords: tools, compilation
 
 ;; This file is not part of GNU Emacs.
