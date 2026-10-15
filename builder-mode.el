@@ -101,15 +101,11 @@ COMMAND is the default compile command string."
          (cmd (builder-candidate-command candidate)))
     (read-from-minibuffer "edit command => " cmd)))
 
-(defalias 'tychoish-compilation-read-command #'builder-compilation-read-command)
-
 ;;;###autoload
 (defun builder-compile ()
   "Run interactive compile operation via `builder-compile-project'."
   (interactive)
   (builder-compile-project))
-
-(defalias 'tychoish-compile #'builder-compile)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; minor mode definition

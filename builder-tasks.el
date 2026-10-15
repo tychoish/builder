@@ -28,7 +28,7 @@
 (require 'eglot-test-at-point)
 (require 'builder-core)
 (require 'builder-elisp)
-(require 'builder-isolate)
+(require 'builder-isolate-elisp)
 
 (f-directories-containing-file-with-extension-function "go")
 (f-directories-containing-file-with-extension-function "py")
@@ -891,7 +891,7 @@ Calls `builder-org-babel-execute-file' on each file found by
         :annotation "delete all .elc files matching CI cleanup step")
        (make-builder-candidate
         :name "ci-docker-tests"
-        :command "emacsclient --eval '(tychoish-run-ci-tests-docker)'"
+        :command "emacsclient --eval '(builder-run-ci-tests-docker)'"
         :directory root
         :priority 0
         :annotation "run CI test suite in silex/emacs:30.2-ci docker container"))))

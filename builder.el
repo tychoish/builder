@@ -32,7 +32,7 @@
 (require 'builder-core)
 (require 'builder-mode)
 (require 'builder-elisp)
-(require 'builder-isolate)
+(require 'builder-isolate-elisp)
 (require 'builder-tasks)
 
 (when (or (featurep 'mcpkit)
@@ -42,13 +42,14 @@
 ;;;###autoload (autoload 'builder "builder-core" "Primary interactive entry point for `builder'." t)
 ;;;###autoload (autoload 'builder-compile-project "builder-core" "Run interactive compilation for project." t)
 ;;;###autoload (autoload 'builder-change-directory "builder-core" "Change compilation directory." t)
+;;;###autoload (autoload 'builder-compile "builder-mode" "Run interactive compile operation." t)
 ;;;###autoload (autoload 'builder-mode "builder-mode" "Global minor mode for compilation enhancements." t)
 ;;;###autoload (autoload 'builder-elisp-package-reload "builder-elisp" "Reload an elisp package into current session." t)
 ;;;###autoload (autoload 'builder-elisp-package-test "builder-elisp" "Run tests for elisp package." t)
 ;;;###autoload (autoload 'builder-elisp-package-compile "builder-elisp" "Compile elisp package files." t)
 ;;;###autoload (autoload 'builder-run-ert-tests-with-prefix "builder-elisp" "Run ERT tests matching prefix." t)
 ;;;###autoload (autoload 'builder-run-ert-tests-with-glob "builder-elisp" "Run ERT tests matching glob pattern." t)
-;;;###autoload (autoload 'builder-isolated-check "builder-isolate" "Run isolated subprocess or daemon check." nil)
+;;;###autoload (autoload 'builder-isolated-check "builder-isolate-elisp" "Run isolated subprocess or daemon check." nil)
 
 (provide 'builder)
 ;;; builder.el ends here

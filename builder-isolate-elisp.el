@@ -1,4 +1,4 @@
-;;; builder-isolate.el --- Isolated subprocess and daemon check runners -*- lexical-binding: t; -*-
+;;; builder-isolate-elisp.el --- Isolated subprocess and daemon check runners -*- lexical-binding: t; -*-
 
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
@@ -32,13 +32,13 @@
 (declare-function sprite-direct-eval-non-blocking "sprite-direct")
 (declare-function sprite-direct-promise-then "sprite-direct")
 
-(defgroup builder-isolate nil
+(defgroup builder-isolate-elisp nil
   "Isolated check and execution runners."
   :group 'builder
   :prefix "builder-isolate-")
 
 
-(defun tychoish-run-ci-tests-docker ()
+(defun builder-run-ci-tests-docker ()
   "Run CI tests for the current project in a Docker container.
 Detects whether a Cask file is present in the project root to
 select the appropriate silex/emacs image and test invocation.
@@ -636,5 +636,5 @@ TRANSPORT is either `subprocess' (default) or `sprite'."
        ('package-test (builder-isolate-sprite-test-check target :sprite sprite :callback callback))))
     (_ (user-error "Unknown transport: %s" transport))))
 
-(provide 'builder-isolate)
-;;; builder-isolate.el ends here
+(provide 'builder-isolate-elisp)
+;;; builder-isolate-elisp.el ends here

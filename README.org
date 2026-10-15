@@ -52,7 +52,7 @@ Protocol (MCP) via [[https://github.com/tychoish/mcpkit][mcpkit]].
 | =builder-core.el= | Candidate struct, registry, caching, selection, compilation driver|
 | =builder-mode.el= | Global minor mode, error regexps, ANSI colorization, keybindings |
 | =builder-elisp.el= | Path resolver registry, package reload, test, compile, lint |
-| =builder-isolate.el=| Subprocess & daemon isolation runners, clean-elc, native compile |
+| =builder-isolate-elisp.el=| Subprocess & daemon isolation runners, clean-elc, native compile |
 | =builder-tasks.el= | 24 declarative candidate generator pipelines for supported tools|
 | =builder-mcp.el= | Model Context Protocol service on port 8765 via =mcpkit= |
 | =builder.el= | Primary package entry point, autoloads, and metadata |
