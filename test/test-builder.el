@@ -979,18 +979,14 @@ or a resolved-but-unsuccessful result alike."
 
 (ert-deftest builder-test/mcp-discover-tasks ()
   "MCP tool `discover_tasks' returns structured candidate plists."
-  (when (featurep 'mcpkit)
-    (require 'builder-mcp)
-    (let ((tasks (builder-mcp-call-tool 'discover_tasks `(:directory ,default-directory))))
-      (should (listp tasks)))))
+  (let ((tasks (builder-mcp-call-tool 'discover_tasks `(:directory ,default-directory))))
+    (should (listp tasks))))
 
 (ert-deftest builder-test/mcp-read-buffer-missing ()
   "MCP tool `read_buffer' reports missing buffer cleanly."
-  (when (featurep 'mcpkit)
-    (require 'builder-mcp)
-    (let ((res (builder-mcp-call-tool 'read_buffer '(:buffer_name "*non-existent-compilation*"))))
-      (should-not (plist-get res :exists))
-      (should (string-equal (plist-get res :error) "Buffer not found")))))
+  (let ((res (builder-mcp-call-tool 'read_buffer '(:buffer_name "*non-existent-compilation*"))))
+    (should-not (plist-get res :exists))
+    (should (string-equal (plist-get res :error) "Buffer not found"))))
 
 (provide 'test-builder)
 ;;; test-builder.el ends here
