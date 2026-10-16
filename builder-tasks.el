@@ -3,7 +3,7 @@
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (f "0.20.0") (xtdlib "0.1.0") (eglot-test-at-point "0.1.0"))
+;; Package-Requires: ((emacs "29.1") (f "0.20.0") (xtdlib "0.1.0"))
 ;; Keywords: tools, compilation
 
 ;; This file is not part of GNU Emacs.
@@ -25,7 +25,8 @@
 (require 'xtd-macro)
 (require 'xtd-project)
 (require 'xtd-s)
-(require 'eglot-test-at-point)
+(require 'eglot-test-at-point nil t)
+(declare-function eglot-test-at-point--go-names-in-buffer "eglot-test-at-point")
 (require 'builder-core)
 (require 'builder-elisp)
 (require 'builder-isolate-elisp)
@@ -393,6 +394,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
              (directory (f-dirname filename))
              (basename  (file-name-nondirectory filename))
              (short-path (f-collapse-homedir directory))
+             ((fboundp 'eglot-test-at-point--go-names-in-buffer))
              (test-names (eglot-test-at-point--go-names-in-buffer)))
    (seq-mapcat
     (lambda (it)

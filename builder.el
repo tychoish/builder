@@ -3,7 +3,7 @@
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (f "0.20.0") (xtdlib "0.1.0") (annotated-completing-read "0.1.0") (eglot-test-at-point "0.1.0") (mcpkit "0.1.0"))
+;; Package-Requires: ((emacs "29.1") (f "0.20.0") (xtdlib "0.1.0") (annotated-completing-read "0.1.0") (mcpkit "0.1.0"))
 ;; Keywords: tools, compilation, convenience
 ;; URL: https://github.com/tychoish/builder
 

@@ -36,9 +36,12 @@ jobs:
                                              ("elpaish" . "https://tychoish.github.io/elpaish/snapshot/"))))
               (package-initialize)
               (unless package-archive-contents (package-refresh-contents))
-              (dolist (pkg (quote (f xtdlib annotated-completing-read eglot-test-at-point mcpkit sprite)))
+              (dolist (pkg (quote (f xtdlib annotated-completing-read mcpkit sprite)))
                 (unless (package-installed-p pkg)
-                  (package-install pkg))))'
+                  (package-install pkg)))
+              (when (version<= "30.1" emacs-version)
+                (unless (package-installed-p (quote eglot-test-at-point))
+                  (package-install (quote eglot-test-at-point)))))'
 
       - name: Run Tests
         run: |
