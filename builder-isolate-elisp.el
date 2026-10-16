@@ -237,6 +237,11 @@ name the way `*Compile-Log*' would be for an in-process compile; clears
       (erase-buffer)
       (insert (or output "")))))
 
+(defun builder-emacs-conf--builder-library-dir ()
+  "Return directory containing `builder' if resolvable on `load-path'."
+  (let ((lib (locate-library "builder")))
+    (and lib (file-name-directory lib))))
+
 ;;;; async.el transport -- throwaway `emacs --batch' subprocess
 
 (defun builder-emacs-conf--isolated-batch-eval (form)
@@ -248,14 +253,16 @@ byte-compiler warnings also write to).  Returns (cons nil PROCESS-OUTPUT)
 if the child never wrote a result -- e.g. FORM signaled outside its own
 `condition-case', as the `do-*' checks above are careful not to."
   (let* ((result-file (make-temp-file "builder-isolated-result-"))
-         (buf (generate-new-buffer " *builder-isolated-batch*")))
+         (buf (generate-new-buffer " *builder-isolated-batch*"))
+         (builder-dir (builder-emacs-conf--builder-library-dir)))
     (unwind-protect
         (progn
-          (call-process "emacs" nil buf nil
-                        "--batch" "-L" (expand-file-name "lisp" user-emacs-directory)
-                        "-f" "package-initialize" "--eval" "(require 'builder)"
-                        "--eval" (format "(with-temp-file %S (prin1 %S (current-buffer)))"
-                                        result-file form))
+          (apply #'call-process "emacs" nil buf nil
+                 (append (list "--batch" "-L" (expand-file-name "lisp" user-emacs-directory))
+                         (when builder-dir (list "-L" builder-dir))
+                         (list "-f" "package-initialize" "--eval" "(require 'builder)"
+                               "--eval" (format "(with-temp-file %S (prin1 %S (current-buffer)))"
+                                               result-file form))))
           (builder-emacs-conf--read-result-file
            result-file (with-current-buffer buf (buffer-string))))
       (kill-buffer buf)
@@ -326,24 +333,26 @@ displaying that buffer on failure."
   (interactive (list (buffer-file-name)))
   (let* ((expanded (expand-file-name file user-emacs-directory))
          (result-file (make-temp-file "builder-isolated-result-")))
-    (async-start-process
-     "builder-async-byte-compile" "emacs"
-     (lambda (proc)
-       (let* ((result (builder-emacs-conf--read-result-file
-                       result-file (with-current-buffer (process-buffer proc) (buffer-string))))
-              (success (car result)))
-         (when (file-exists-p result-file)
-           (delete-file result-file))
-         (builder-emacs-conf--report-log "*Compile-Log*" (cdr result))
-         (alert (format "isolated byte-compile %s" (if success "passed" "FAILED"))
-                :title (format "builder-emacs-conf-async-byte-compile-check: %s" file))
-         (if success
-             (kill-buffer (process-buffer proc))
-           (display-buffer "*Compile-Log*"))))
-     "--batch" "-L" (expand-file-name "lisp" user-emacs-directory)
-     "-f" "package-initialize" "--eval" "(require 'builder)"
-     "--eval" (format "(with-temp-file %S (prin1 (builder-emacs-conf--do-byte-compile-check %S) (current-buffer)))"
-                      result-file expanded))))
+    (let ((builder-dir (builder-emacs-conf--builder-library-dir)))
+      (apply #'async-start-process
+             "builder-async-byte-compile" "emacs"
+             (lambda (proc)
+               (let* ((result (builder-emacs-conf--read-result-file
+                               result-file (with-current-buffer (process-buffer proc) (buffer-string))))
+                      (success (car result)))
+                 (when (file-exists-p result-file)
+                   (delete-file result-file))
+                 (builder-emacs-conf--report-log "*Compile-Log*" (cdr result))
+                 (alert (format "isolated byte-compile %s" (if success "passed" "FAILED"))
+                        :title (format "builder-emacs-conf-async-byte-compile-check: %s" file))
+                 (if success
+                     (kill-buffer (process-buffer proc))
+                   (display-buffer "*Compile-Log*"))))
+             (append (list "--batch" "-L" (expand-file-name "lisp" user-emacs-directory))
+                     (when builder-dir (list "-L" builder-dir))
+                     (list "-f" "package-initialize" "--eval" "(require 'builder)"
+                           "--eval" (format "(with-temp-file %S (prin1 (builder-emacs-conf--do-byte-compile-check %S) (current-buffer)))"
+                                            result-file expanded)))))))
 
 ;;;; sprite transport -- persistent daemon, reached over sprite-direct
 
