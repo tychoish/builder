@@ -597,8 +597,6 @@ regenerated."
                (if regenerated (mapconcat #'symbol-name regenerated ", ") "none")))
     regenerated))
 
-(provide 'builder)
-;;; builder.el ends here
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
