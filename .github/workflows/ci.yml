@@ -36,7 +36,7 @@ jobs:
                                              ("elpaish" . "https://tychoish.github.io/elpaish/snapshot/"))))
               (package-initialize)
               (unless package-archive-contents (package-refresh-contents))
-              (dolist (pkg (quote (f xtdlib annotated-completing-read eglot-test-at-point mcpkit ht sprite)))
+              (dolist (pkg (quote (f xtdlib annotated-completing-read eglot-test-at-point mcpkit sprite)))
                 (unless (package-installed-p pkg)
                   (package-install pkg))))'
 

@@ -352,7 +352,7 @@ Each function is called with four arguments:
                            buffers; this is what drives language-specific
                            discovery (e.g. finding go.mod or Cargo.toml files
                            near files the user actually has open).
-  TABLE                  — a `ht' hash table of `builder-candidate' objects;
+  TABLE                  — a hash table of `builder-candidate' objects;
                            functions should call `builder--add-candidates' to
                            populate it and return t.")
 
@@ -360,7 +360,7 @@ Each function is called with four arguments:
   "Register FN as a candidate generator on `builder-candidate-functions'.
 FN is called with (ROOT NAME DIRS TABLE): ROOT is the project root path, NAME
 is the project name, DIRS is the set of open-buffer directories that drives
-language-specific discovery, and TABLE is a `ht' of `builder-candidate'
+language-specific discovery, and TABLE is a hash table of `builder-candidate'
 objects.  FN should call `builder--add-candidates' to populate TABLE and
 return t.
 
