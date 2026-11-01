@@ -34,6 +34,7 @@
 (require 'builder-elisp)
 (require 'builder-isolate-elisp)
 (require 'builder-tasks)
+(require 'builder-rust)
 (require 'builder-mcp)
 
 ;;;###autoload (autoload 'builder "builder-core" "Primary interactive entry point for `builder'." t)
@@ -47,6 +48,11 @@
 ;;;###autoload (autoload 'builder-run-ert-tests-with-prefix "builder-elisp" "Run ERT tests matching prefix." t)
 ;;;###autoload (autoload 'builder-run-ert-tests-with-glob "builder-elisp" "Run ERT tests matching glob pattern." t)
 ;;;###autoload (autoload 'builder-isolated-check "builder-isolate-elisp" "Run isolated subprocess or daemon check." nil)
+;;;###autoload (autoload 'builder-rust-build "builder-rust" "Run cargo build for current Rust project." t)
+;;;###autoload (autoload 'builder-rust-test "builder-rust" "Run cargo test for current Rust project." t)
+;;;###autoload (autoload 'builder-rust-check "builder-rust" "Run cargo check for current Rust project." t)
+;;;###autoload (autoload 'builder-rust-clippy "builder-rust" "Run cargo clippy for current Rust project." t)
+;;;###autoload (autoload 'builder-rust-run "builder-rust" "Run cargo binary for current Rust project." t)
 ;;;###autoload (autoload 'builder-mcp-start "builder-mcp" "Start or merge the builder MCP service into mcpkit." t)
 
 (provide 'builder)

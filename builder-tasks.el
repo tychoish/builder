@@ -30,6 +30,7 @@
 (require 'builder-core)
 (require 'builder-elisp)
 (require 'builder-isolate-elisp)
+(require 'builder-rust)
 
 (f-directories-containing-file-with-extension-function "go")
 (f-directories-containing-file-with-extension-function "py")
@@ -516,39 +517,57 @@ Signals `user-error` if not in a Go module/project or if `go` or
 
 (builder-register-candidates
  :name "rust-project"
- :pipeline (append
-	     (seq-mapcat
-	      (lambda (it)
-		(let ((annotation-directory (f-collapse-homedir it))
-		      (directory it))
-		  (seq-map
-		   (lambda (it)
-		     (if (f-equal-p project-root-directory directory)
-			 (make-builder-candidate
-			  :directory directory
-			  :command (format "cargo %s" it)
-			  :annotation (format "run cargo target '%s' in project root (%s)" it annotation-directory))
-		       (make-builder-candidate
-			:directory directory
-			:name (format "cargo %s <%s>" it (file-name-sans-extension (file-name-nondirectory directory)))
-			:command (format "cd %s; cargo %s" directory it)
-			:annotation (format "run cargo target '%s' in package (%s)" it annotation-directory))))
-		   '("build" "check" "test" "fix" "fmt" "clippy" "clippy --fix"))))
-	      (f-directories-containing-file-cargo-toml directories))
-	     (when (f-directories-containing-file-cargo-toml project-root-directory)
-	       (let ((annotation-directory (f-collapse-homedir project-root-directory)))
-		 (seq-mapcat
-		  (lambda (it)
-		    (list
-		     (make-builder-candidate
-		      :directory project-root-directory
-		      :command (concat "cargo build --" it)
-		      :annotation (format "build %s in project root (%s)" it annotation-directory))
-		     (make-builder-candidate
-		      :directory project-root-directory
-		      :command (concat "cargo check --" it)
-		      :annotation (format "run static analysis %s in project root (%s)" it annotation-directory))))
-		  '("libs" "bins" "examples" "tests" "benches" "all-targets"))))))
+ :pipeline (let* ((root project-root-directory)
+		  (annotation-root (f-collapse-homedir root))
+		  (is-workspace (builder-rust-workspace-p root))
+		  (packages (builder-rust-packages root)))
+	     (append
+	      (when is-workspace
+		(list
+		 (make-builder-candidate
+		  :directory root
+		  :command "cargo build --workspace"
+		  :annotation (format "build all workspace crates (%s)" annotation-root))
+		 (make-builder-candidate
+		  :directory root
+		  :command "cargo test --workspace"
+		  :annotation (format "test all workspace crates (%s)" annotation-root))
+		 (make-builder-candidate
+		  :directory root
+		  :command "cargo check --workspace"
+		  :annotation (format "check all workspace crates (%s)" annotation-root))
+		 (make-builder-candidate
+		  :directory root
+		  :command "cargo clippy --workspace"
+		  :annotation (format "clippy lint all workspace crates (%s)" annotation-root))
+		 (make-builder-candidate
+		  :directory root
+		  :command "cargo build --workspace --release"
+		  :annotation (format "release build workspace (%s)" annotation-root))))
+	      (seq-mapcat
+	       (lambda (pkg)
+		 (seq-map
+		  (lambda (target)
+		    (make-builder-candidate
+		     :directory root
+		     :name (format "cargo %s <%s>" target pkg)
+		     :command (format "cargo %s -p %s" target pkg)
+		     :annotation (format "run cargo %s in package %s" target pkg)))
+		  '("build" "check" "test" "clippy" "fmt")))
+	       packages)
+	      (when (f-directories-containing-file-cargo-toml root)
+		(seq-mapcat
+		 (lambda (target)
+		   (list
+		    (make-builder-candidate
+		     :directory root
+		     :command (concat "cargo build --" target)
+		     :annotation (format "build %s in project root (%s)" target annotation-root))
+		    (make-builder-candidate
+		     :directory root
+		     :command (concat "cargo check --" target)
+		     :annotation (format "run static analysis %s in project root (%s)" target annotation-root))))
+		 '("libs" "bins" "examples" "tests" "benches" "all-targets"))))))
 
 (builder-register-candidates
  :name "justfile"

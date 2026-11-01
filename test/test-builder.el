@@ -988,5 +988,20 @@ or a resolved-but-unsuccessful result alike."
     (should-not (plist-get res :exists))
     (should (string-equal (plist-get res :error) "Buffer not found"))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; builder-rust
+
+(ert-deftest builder-test/rust-workspace-discovery ()
+  "Test Rust workspace detection and package discovery."
+  (let ((ws-root (f-canonical "/home/tychoish/src/orgx")))
+    (when (f-exists-p ws-root)
+      (should (builder-rust-workspace-p ws-root))
+      (should (member "orgx-cli" (builder-rust-packages ws-root)))
+      (should (member "orgx" (builder-rust-binaries ws-root))))))
+
+(ert-deftest builder-test/rust-batch-build-dry ()
+  "Test builder-rust-batch action validation."
+  (should-error (builder-rust-batch :unknown-action)))
+
 (provide 'test-builder)
 ;;; test-builder.el ends here
