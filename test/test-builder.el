@@ -993,11 +993,22 @@ or a resolved-but-unsuccessful result alike."
 
 (ert-deftest builder-test/rust-workspace-discovery ()
   "Test Rust workspace detection and package discovery."
-  (let ((ws-root (f-canonical "/home/tychoish/src/orgx")))
-    (when (f-exists-p ws-root)
-      (should (builder-rust-workspace-p ws-root))
-      (should (member "orgx-cli" (builder-rust-packages ws-root)))
-      (should (member "orgx" (builder-rust-binaries ws-root))))))
+  (let* ((tmp-dir (make-temp-file "builder-rust-ws-" t))
+         (cargo-ws (f-join tmp-dir "Cargo.toml"))
+         (crate-dir (f-join tmp-dir "crates" "my-crate"))
+         (cargo-crate (f-join crate-dir "Cargo.toml"))
+         (src-dir (f-join crate-dir "src"))
+         (main-rs (f-join src-dir "main.rs")))
+    (unwind-protect
+        (progn
+          (f-write-text "[workspace]\nmembers = [\"crates/*\"]\n" 'utf-8 cargo-ws)
+          (make-directory src-dir t)
+          (f-write-text "[package]\nname = \"my-crate\"\nversion = \"0.1.0\"\n" 'utf-8 cargo-crate)
+          (f-write-text "fn main() {}\n" 'utf-8 main-rs)
+          (should (builder-rust-workspace-p tmp-dir))
+          (should (member "my-crate" (builder-rust-packages tmp-dir)))
+          (should (member "my-crate" (builder-rust-binaries tmp-dir))))
+      (f-delete tmp-dir t))))
 
 (ert-deftest builder-test/rust-batch-build-dry ()
   "Test builder-rust-batch action validation."
