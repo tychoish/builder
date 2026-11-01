@@ -1010,9 +1010,37 @@ or a resolved-but-unsuccessful result alike."
           (should (member "my-crate" (builder-rust-binaries tmp-dir))))
       (f-delete tmp-dir t))))
 
-(ert-deftest builder-test/rust-batch-build-dry ()
-  "Test builder-rust-batch action validation."
-  (should-error (builder-rust-batch :unknown-action)))
+(ert-deftest builder-test/candidate-id-and-action ()
+  "Test candidate structure with id and action symbols."
+  (let ((cand (make-builder-candidate
+               :id 'my-custom-test
+               :action 'test
+               :command "cargo test"
+               :name "my-test")))
+    (should (eq (builder-candidate-id cand) 'my-custom-test))
+    (should (eq (builder-candidate-action cand) 'test))))
+
+(ert-deftest builder-test/find-candidate-by-symbol-and-action ()
+  "Test builder--find-candidate resolution by id and action."
+  (let ((table (make-hash-table :test #'equal))
+        (c1 (make-builder-candidate :id 'rust-test-ws :action 'test :command "cargo test --workspace" :name "test-ws" :priority 1))
+        (c2 (make-builder-candidate :id 'rust-build-ws :action 'build :command "cargo build --workspace" :name "build-ws" :priority 2)))
+    (builder--add-candidate table c1)
+    (builder--add-candidate table c2)
+    ;; Find by exact ID
+    (should (eq (builder--find-candidate 'rust-test-ws table) c1))
+    (should (eq (builder--find-candidate 'rust-build-ws table) c2))
+    ;; Find by semantic action
+    (should (eq (builder--find-candidate 'test table) c1))
+    (should (eq (builder--find-candidate 'build table) c2))))
+
+(ert-deftest builder-test/mcp-discover-tasks-has-id-and-action ()
+  "MCP tool `discover_tasks' returns :id and :action metadata."
+  (let ((tasks (builder-mcp-call-tool 'discover_tasks `(:directory ,default-directory))))
+    (should (listp tasks))
+    (when-let* ((first-task (car tasks)))
+      (should (plist-member first-task :id))
+      (should (plist-member first-task :action)))))
 
 (provide 'test-builder)
 ;;; test-builder.el ends here

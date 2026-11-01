@@ -53,11 +53,135 @@
         default-directory))))
 
 
+(defun builder--find-candidate (target table)
+  "Find candidate matching TARGET in candidate TABLE.
+TARGET can be:
+- a symbol matching `builder-candidate-id' or `builder-candidate-action'
+- a string matching `builder-candidate-name' or `builder-candidate-command'
+- a `builder-candidate' struct directly."
+  (cond
+   ((builder-candidate-p target) target)
+   ((null target) nil)
+   ((symbolp target)
+    (or (seq-find (lambda (c) (eq (builder-candidate-id c) target))
+                  (map-values table))
+        (let ((action-matches
+               (seq-filter (lambda (c) (eq (builder-candidate-action c) target))
+                           (map-values table))))
+          (car (seq-sort-by #'builder-candidate-priority #'< action-matches)))
+        (map-elt table (symbol-name target))
+        (seq-find (lambda (c) (string-equal (builder-candidate-command c) (symbol-name target)))
+                  (map-values table))))
+   ((stringp target)
+    (or (map-elt table target)
+        (seq-find (lambda (c) (string-equal (builder-candidate-command c) target))
+                  (map-values table))
+        (let ((sym (intern-soft target)))
+          (when sym
+            (or (seq-find (lambda (c) (eq (builder-candidate-id c) sym))
+                          (map-values table))
+                (let ((action-matches
+                       (seq-filter (lambda (c) (eq (builder-candidate-action c) sym))
+                                   (map-values table))))
+                  (car (seq-sort-by #'builder-candidate-priority #'< action-matches))))))))))
+
+;;;###autoload
+(cl-defun builder-select (&optional target &key force edit (buffer-name nil) (directory nil))
+  "Select and execute a builder compilation candidate.
+
+TARGET can be:
+- A candidate symbol ID (e.g. \='rust-test-workspace)
+- A semantic action symbol (e.g. \='test, \='build, \='check)
+- A string matching command name or text
+- Nil, which triggers interactive completion via `annotated-completing-read'.
+
+When FORCE is non-nil, bypass minibuffer editing (`edit command =>`) and compile
+immediately.
+
+When EDIT is non-nil, force opening the minibuffer prompt even if TARGET was given.
+
+DIRECTORY specifies the working directory (defaults to `default-directory').
+BUFFER-NAME specifies an optional custom compilation buffer name."
+  (interactive)
+  (let* ((dir (or directory default-directory))
+         (default-directory dir)
+         (project-root-directory (approximate-project-root))
+         (candidates (builder--get-candidates dir))
+         (candidate (when target (builder--find-candidate target candidates))))
+
+    (unless candidate
+      (let ((cc-result (builder--read-command (when (stringp target) target) candidates)))
+        (setq candidate (car cc-result))))
+
+    (let* ((start-at (current-time))
+           (raw-command (builder-candidate-command candidate))
+           (compile-command
+            (if (or (and force (not edit))
+                    (and target (not edit)))
+                raw-command
+              (read-from-minibuffer "edit command => " raw-command)))
+           (op-default-directory (or (builder-candidate-directory candidate) default-directory))
+           (prior-buf-name (builder--buffer-for-command compile-command))
+           (compilation-buffer-candidates (builder--project-compilation-buffers :name buffer-name))
+           (op-name (or buffer-name
+                        (if force
+                            (or prior-buf-name
+                                (format "*compilation*<%s>" (approximate-project-name)))
+                          (annotated-completing-read
+                           compilation-buffer-candidates
+                           :prompt "compilation buffer => "
+                           :require-match nil
+                           :initial-input prior-buf-name))))
+           (compile-buf (get-buffer op-name)))
+
+      (save-some-buffers
+       t
+       (lambda () (let ((filename (buffer-file-name)))
+                    (and filename (file-in-directory-p filename project-root-directory)))))
+
+      (let ((active-buf
+             (if (and compile-buf
+                      (not current-prefix-arg)
+                      (builder--buffer-ran-command-p compile-buf compile-command))
+                 (progn (with-current-buffer compile-buf (recompile)) compile-buf)
+               (let ((default-directory op-default-directory))
+                 (compilation-start
+                  compile-command
+                  'compilation-mode
+                  (compile-buffer-name op-name))))))
+
+        (with-current-buffer active-buf
+          (add-one-shot-hook :name (format "%s notification hook" op-name)
+           :hook 'compilation-finish-functions
+           :local t
+           :make-unique t
+           :args (compilation-buffer msg)
+           :form (builder--compile-post-hook
+                  compilation-buffer
+                  msg
+                  start-at
+                  :process-name "sardis-notify"
+                  :program "sardis"
+                  :args '("notify" "send")
+                  :send-when (or current-prefix-arg
+                                 (not (get-buffer-window active-buf t))
+                                 (< 10 (float-time (time-since (current-idle-time)))))))
+
+          (when-let* ((hook (builder-candidate-hook candidate)))
+            (add-one-shot-hook :name (format "post-%s-hook-operation" op-name)
+             :hook 'compilation-finish-functions
+             :make-unique t
+             :local t
+             :args (compilation-buffer msg)
+             :form (funcall hook compilation-buffer msg))))
+
+        active-buf))))
+
 ;;;###autoload
 (defun builder ()
   "Run compile operation selecting compile buffer and commands."
   (interactive)
-  (builder-compile-project))
+  (builder-select))
 
 (cl-defun builder--compile-post-hook
     (buffer compile-result-message started-at &optional &key process-name program args send-when
@@ -297,7 +421,9 @@ priority from CANDIDATES, with key length as a final tiebreaker."
 (cl-defstruct (builder-candidate
                (:constructor nil)
                (:constructor make-builder-candidate
-			     (&key command
+			     (&key id
+				   action
+				   command
 				   (name (if (> (length command) 32) (concat (substring command 0 29) "...") command))
 				   (directory default-directory)
 				   (annotation (if (not (string-equal command name))
@@ -307,6 +433,14 @@ priority from CANDIDATES, with key length as a final tiebreaker."
 				   notification-threshold
 				   (priority 2))))
   "Structure for compilation candidates."
+  (id
+   nil
+   :documentation "symbol identifying candidate, e.g. \='rust-test, \='elisp-compile"
+   :type symbol)
+  (action
+   nil
+   :documentation "semantic action category, e.g. \='test, \='build, \='check, \='clippy, \='clean"
+   :type symbol)
   (name
    "build"
    :documentation "name of command, default to using the command"

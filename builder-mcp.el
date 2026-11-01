@@ -54,7 +54,9 @@
     (when (hash-table-p table)
       (maphash
        (lambda (_name cand)
-         (push (list :name (builder-candidate-name cand)
+         (push (list :id (when-let* ((id (builder-candidate-id cand))) (symbol-name id))
+                     :action (when-let* ((act (builder-candidate-action cand))) (symbol-name act))
+                     :name (builder-candidate-name cand)
                      :command (or (builder-candidate-command cand) (builder-candidate-name cand))
                      :directory (or (builder-candidate-directory cand) dir)
                      :priority (builder-candidate-priority cand)
@@ -69,22 +71,35 @@
 (mcpkit-register-tool 'run_task 'builder
   :description "Execute a build or test command in an Emacs compilation buffer."
   :input-schema '(:type "object"
-                  :properties (:command (:type "string" :description "Shell command to run")
+                  :properties (:target (:type "string" :description "Candidate symbol ID, semantic action (e.g. 'rust-test-workspace, 'test, 'build), or command name")
+                               :id (:type "string" :description "Alias for target")
+                               :command (:type "string" :description "Raw shell command to run directly")
                                :directory (:type "string" :description "Working directory (defaults to current)")
                                :buffer_name (:type "string" :description "Custom compilation buffer name"))
-                  :required ["command"])
-  (let* ((cmd (plist-get args :command))
+                  :required [])
+  (let* ((target-str (or (plist-get args :target)
+                         (plist-get args :id)))
+         (cmd (plist-get args :command))
          (dir (or (plist-get args :directory) default-directory))
-         (custom-buf (plist-get args :buffer_name))
-         (target-name (or custom-buf
-                          (format "*compilation*<%s>" (file-name-nondirectory (directory-file-name dir))))))
-    (let ((compilation-buffer-name-function (lambda (_mode) target-name))
-          (default-directory dir))
-      (let ((buf (compilation-start cmd)))
-        (list :buffer_name (buffer-name buf)
-              :command cmd
-              :directory dir
-              :status "started")))))
+         (custom-buf (plist-get args :buffer_name)))
+    (if target-str
+        (let* ((target-sym (intern target-str))
+               (buf (builder-select target-sym :force t :directory dir :buffer-name custom-buf)))
+          (list :buffer_name (buffer-name buf)
+                :target target-str
+                :directory dir
+                :status "started"))
+      (if (null cmd)
+          (error "Either target/id or command must be provided to run_task")
+        (let* ((target-name (or custom-buf
+                                (format "*compilation*<%s>" (file-name-nondirectory (directory-file-name dir))))))
+          (let ((compilation-buffer-name-function (lambda (_mode) target-name))
+                (default-directory dir))
+            (let ((buf (compilation-start cmd)))
+              (list :buffer_name (buffer-name buf)
+                    :command cmd
+                    :directory dir
+                    :status "started"))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tool 3: read_buffer

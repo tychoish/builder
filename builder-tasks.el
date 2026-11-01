@@ -522,33 +522,72 @@ Signals `user-error` if not in a Go module/project or if `go` or
 		  (is-workspace (builder-rust-workspace-p root))
 		  (packages (builder-rust-packages root)))
 	     (append
-	      (when is-workspace
-		(list
-		 (make-builder-candidate
-		  :directory root
-		  :command "cargo build --workspace"
-		  :annotation (format "build all workspace crates (%s)" annotation-root))
-		 (make-builder-candidate
-		  :directory root
-		  :command "cargo test --workspace"
-		  :annotation (format "test all workspace crates (%s)" annotation-root))
-		 (make-builder-candidate
-		  :directory root
-		  :command "cargo check --workspace"
-		  :annotation (format "check all workspace crates (%s)" annotation-root))
-		 (make-builder-candidate
-		  :directory root
-		  :command "cargo clippy --workspace"
-		  :annotation (format "clippy lint all workspace crates (%s)" annotation-root))
-		 (make-builder-candidate
-		  :directory root
-		  :command "cargo build --workspace --release"
-		  :annotation (format "release build workspace (%s)" annotation-root))))
+	      (if is-workspace
+		  (list
+		   (make-builder-candidate
+		    :id 'rust-build-workspace
+		    :action 'build
+		    :directory root
+		    :command "cargo build --workspace"
+		    :annotation (format "build all workspace crates (%s)" annotation-root))
+		   (make-builder-candidate
+		    :id 'rust-test-workspace
+		    :action 'test
+		    :directory root
+		    :command "cargo test --workspace"
+		    :annotation (format "test all workspace crates (%s)" annotation-root))
+		   (make-builder-candidate
+		    :id 'rust-check-workspace
+		    :action 'check
+		    :directory root
+		    :command "cargo check --workspace"
+		    :annotation (format "check all workspace crates (%s)" annotation-root))
+		   (make-builder-candidate
+		    :id 'rust-clippy-workspace
+		    :action 'clippy
+		    :directory root
+		    :command "cargo clippy --workspace"
+		    :annotation (format "clippy lint all workspace crates (%s)" annotation-root))
+		   (make-builder-candidate
+		    :id 'rust-release-workspace
+		    :action 'build
+		    :directory root
+		    :command "cargo build --workspace --release"
+		    :annotation (format "release build workspace (%s)" annotation-root)))
+		(when (and (f-exists-p (f-join root "Cargo.toml"))
+			   (not (string-empty-p root)))
+		  (list
+		   (make-builder-candidate
+		    :id 'rust-build
+		    :action 'build
+		    :directory root
+		    :command "cargo build"
+		    :annotation (format "build project in root (%s)" annotation-root))
+		   (make-builder-candidate
+		    :id 'rust-test
+		    :action 'test
+		    :directory root
+		    :command "cargo test"
+		    :annotation (format "test project in root (%s)" annotation-root))
+		   (make-builder-candidate
+		    :id 'rust-check
+		    :action 'check
+		    :directory root
+		    :command "cargo check"
+		    :annotation (format "check project in root (%s)" annotation-root))
+		   (make-builder-candidate
+		    :id 'rust-clippy
+		    :action 'clippy
+		    :directory root
+		    :command "cargo clippy"
+		    :annotation (format "clippy project in root (%s)" annotation-root)))))
 	      (seq-mapcat
 	       (lambda (pkg)
 		 (seq-map
 		  (lambda (target)
 		    (make-builder-candidate
+		     :id (intern (format "rust-%s-%s" target pkg))
+		     :action (intern target)
 		     :directory root
 		     :name (format "cargo %s <%s>" target pkg)
 		     :command (format "cargo %s -p %s" target pkg)
@@ -560,10 +599,14 @@ Signals `user-error` if not in a Go module/project or if `go` or
 		 (lambda (target)
 		   (list
 		    (make-builder-candidate
+		     :id (intern (format "rust-build-%s" target))
+		     :action 'build
 		     :directory root
 		     :command (concat "cargo build --" target)
 		     :annotation (format "build %s in project root (%s)" target annotation-root))
 		    (make-builder-candidate
+		     :id (intern (format "rust-check-%s" target))
+		     :action 'check
 		     :directory root
 		     :command (concat "cargo check --" target)
 		     :annotation (format "run static analysis %s in project root (%s)" target annotation-root))))
