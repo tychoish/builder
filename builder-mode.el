@@ -120,8 +120,33 @@ COMMAND is the default compile command string."
     map)
   "Keymap for `builder-mode'.")
 
-(defvar builder--saved-scroll-output nil)
-(defvar builder--saved-max-output-line-length nil)
+(defvar builder-mode--managed-settings
+  '((compilation-scroll-output . t)
+    (compilation-max-output-line-length . nil))
+  "Alist of (SYMBOL . VALUE) settings managed globally by `builder-mode'.")
+
+(defvar builder-mode--saved-settings nil
+  "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before enabling `builder-mode'.")
+
+(defun builder-mode--apply-settings ()
+  "Save previous values and apply `builder-mode--managed-settings'."
+  (setq builder-mode--saved-settings nil)
+  (dolist (pair builder-mode--managed-settings)
+    (let ((sym (car pair))
+          (val (cdr pair)))
+      (push (cons sym (if (boundp sym) (cons t (symbol-value sym)) (cons nil nil)))
+            builder-mode--saved-settings)
+      (set sym val))))
+
+(defun builder-mode--revert-settings ()
+  "Restore variables to their state prior to `builder-mode'."
+  (dolist (entry builder-mode--saved-settings)
+    (let ((sym (car entry))
+          (status (cdr entry)))
+      (if (car status)
+          (set sym (cdr status))
+        (makunbound sym))))
+  (setq builder-mode--saved-settings nil))
 
 ;;;###autoload
 (define-minor-mode builder-mode
@@ -145,10 +170,7 @@ COMMAND is the default compile command string."
           (add-hook 'compilation-finish-functions #'builder-alert-after-finish-in-background))
 
         ;; 4. Output buffer scrolling and line length
-        (setq builder--saved-scroll-output compilation-scroll-output
-              builder--saved-max-output-line-length compilation-max-output-line-length)
-        (setq compilation-scroll-output t
-              compilation-max-output-line-length nil)
+        (builder-mode--apply-settings)
 
         ;; 5. Keybindings in compilation-mode-map
         (when (boundp 'compilation-mode-map)
@@ -166,8 +188,7 @@ COMMAND is the default compile command string."
       (remove-hook 'compilation-finish-functions #'builder-alert-after-finish-in-background))
     (when builder-mode-override-read-command
       (advice-remove 'compilation-read-command #'builder-compilation-read-command))
-    (setq compilation-scroll-output builder--saved-scroll-output
-          compilation-max-output-line-length builder--saved-max-output-line-length)))
+    (builder-mode--revert-settings)))
 
 (provide 'builder-mode)
 ;;; builder-mode.el ends here

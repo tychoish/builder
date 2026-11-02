@@ -192,9 +192,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lifecycle & Orchestration
 
-;; Register with centralized mcpkit autostart: merges into active server
-;; on after-init-hook using namespace resolution for collision prevention.
-(mcpkit-register-autostart 'builder :on-collision 'namespace)
 
 ;;;###autoload
 (defun builder-mcp-start ()

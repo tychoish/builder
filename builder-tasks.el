@@ -50,9 +50,49 @@
 (f-directories-containing-file-function "pyproject.toml")
 
 
+(defcustom builder-candidate-functions
+  '(builder-candidates-for-current-buffer-text-file
+    builder-candidates-for-minibuffer-shell-commands
+    builder-candidates-for-project-compilation-buffer-commands
+    builder-candidates-for-makefiles
+    builder-candidates-for-go-packages
+    builder-candidates-for-go-files
+    builder-candidates-for-go-test-file
+    builder-candidates-for-go-modules
+    builder-candidates-for-py-projects
+    builder-candidates-for-python
+    builder-candidates-for-rust-project
+    builder-candidates-for-justfile
+    builder-candidates-for-emacs-lisp-file
+    builder-candidates-for-emacs-lisp-project
+    builder-candidates-for-org-babel-file
+    builder-candidates-for-org-babel-directory
+    builder-candidates-for-emacs-lisp-package
+    builder-candidates-for-emacs-lisp-test-files
+    builder-candidates-for-emacs-lisp-project-test
+    builder-candidates-for-emacs-lisp-cask
+    builder-candidates-for-emacs-lisp-file-isolated-check
+    builder-candidates-for-emacs-lisp-package-isolated-test
+    builder-candidates-for-emacs-conf-ci-tasks
+    builder-candidates-for-elpaish-build-tasks)
+  "List of functions that populate a table of possible compilation commands.
+Each function is called with four arguments:
+  PROJECT-ROOT-DIRECTORY — absolute path to the project root.
+  PROJECT-NAME           — short name of the project (directory basename).
+  DIRECTORIES            — list of directories derived from open project
+                           buffers; this is what drives language-specific
+                           discovery (e.g. finding go.mod or Cargo.toml files
+                           near files the user actually has open).
+  TABLE                  — a hash table of `builder-candidate' objects;
+                           functions should call `builder--add-candidates' to
+                           populate it and return t."
+  :type 'hook
+  :group 'builder)
+
 ;; candidate discovery/generator registration
 
 (builder-register-candidates
+ :no-hook t
  :name "current-buffer-text-file"
  :predicate (when (and (buffer-file-name)
 		       (derived-mode-p '(org-mode markdown-mode rst-mode)))
@@ -73,6 +113,7 @@
 		  :priority 0))))
 
 (builder-register-candidates
+ :no-hook t
  :name "minibuffer-shell-commands"
  :pipeline (seq-map
 		 (lambda (it)
@@ -89,6 +130,7 @@
 			(seq-map (lambda (it) (cons it "shell-command-history")) shell-command-history))))
 
 (builder-register-candidates
+ :no-hook t
  :name "project-compilation-buffer-commands"
  :pipeline (seq-mapcat
 		 (lambda (it)
@@ -112,6 +154,7 @@
 		  (mode-buffers-for-project :mode 'compilation-mode))))
 
 (builder-register-candidates
+ :no-hook t
  :name "makefiles"
  :pipeline (seq-mapcat
 		 (lambda (it)
@@ -266,6 +309,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
           comp-buf)))))
 
 (builder-register-candidates
+ :no-hook t
  :name "go-packages"
  :pipeline (seq-mapcat
 		 (lambda (it)
@@ -353,6 +397,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
 			       (f-directories-containing-file-with-extension-go directories)
 			       (f-directories-containing-file-go-mod project-root-directory))))))
 (builder-register-candidates
+ :no-hook t
  :name "go-files"
  :pipeline (when-let* ((filename (if (and (buffer-file-name) (derived-mode-p '(go-mode go-ts-mode)))
 				     (buffer-file-name)
@@ -387,6 +432,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
 		  :priority 0))))
 
 (builder-register-candidates
+ :no-hook t
  :name "go-test-file"
  :pipeline
  (when-let* ((filename  (buffer-file-name))
@@ -425,6 +471,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
     test-names)))
 
 (builder-register-candidates
+ :no-hook t
  :name "go-modules"
  :pipeline (let ((go-mod-directories (f-directories-containing-file-go-mod directories)))
 	     (seq-mapcat
@@ -467,6 +514,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
 			      "run builds for all modules and submodules in"))))))))
 	      go-mod-directories)))
 (builder-register-candidates
+ :no-hook t
  :name "py-projects"
  :pipeline (seq-mapcat
 	     (lambda (it)
@@ -497,6 +545,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
 	     (f-directories-containing-file-pyproject-toml directories)))
 
 (builder-register-candidates
+ :no-hook t
  :name "python"
  :pipeline (seq-mapcat
 	     (lambda (it)
@@ -516,6 +565,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
 	     (f-directories-containing-file-with-extension-py directories)))
 
 (builder-register-candidates
+ :no-hook t
  :name "rust-project"
  :pipeline (let* ((root project-root-directory)
 		  (annotation-root (f-collapse-homedir root))
@@ -613,6 +663,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
 		 '("libs" "bins" "examples" "tests" "benches" "all-targets"))))))
 
 (builder-register-candidates
+ :no-hook t
  :name "justfile"
  :pipeline (seq-mapcat
 	     (lambda (it)
@@ -646,6 +697,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
   (seq-filter (lambda (it) (string-equal (file-name-extension it) "el")) (f-entries directory #'file-regular-p)))
 
 (builder-register-candidates
+ :no-hook t
  :name "emacs-lisp-file"
  :pipeline
  (when-let* ((filename (buffer-file-name))
@@ -681,6 +733,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
         :annotation (format "run elsa type analysis on %s" short-name)))))
 
 (builder-register-candidates
+ :no-hook t
  :name "emacs-lisp-project"
  :pipeline
  (when-let* ((_ (derived-mode-p 'emacs-lisp-mode))
@@ -772,6 +825,7 @@ Calls `builder-org-babel-execute-file' on each file found by
           (directory-files-recursively directory "\\.org\\'")))
 
 (builder-register-candidates
+ :no-hook t
  :name "org-babel-file"
  :pipeline
  (when-let* ((filename (buffer-file-name))
@@ -793,6 +847,7 @@ Calls `builder-org-babel-execute-file' on each file found by
         :priority 0))))
 
 (builder-register-candidates
+ :no-hook t
  :name "org-babel-directory"
  :pipeline
  (when-let* ((_ (derived-mode-p 'org-mode))
@@ -816,6 +871,7 @@ Calls `builder-org-babel-execute-file' on each file found by
 
 
 (builder-register-candidates
+ :no-hook t
  :name "emacs-lisp-package"
  :pipeline
  (when-let* ((_ (derived-mode-p 'emacs-lisp-mode))
@@ -840,6 +896,7 @@ Calls `builder-org-babel-execute-file' on each file found by
       ("clean-package"   "builder-elisp-package-clean"   "remove build artifacts of")))))
 
 (builder-register-candidates
+ :no-hook t
  :name "emacs-lisp-test-files"
  :pipeline
  (when-let* ((_ (derived-mode-p 'emacs-lisp-mode))
@@ -861,6 +918,7 @@ Calls `builder-org-babel-execute-file' on each file found by
     test-files)))
 
 (builder-register-candidates
+ :no-hook t
  :name "emacs-lisp-project-test"
  :pipeline
  (when-let* ((_ (derived-mode-p 'emacs-lisp-mode))
@@ -877,6 +935,7 @@ Calls `builder-org-babel-execute-file' on each file found by
 ;; emacs-lisp -- Cask project operations
 
 (builder-register-candidates
+ :no-hook t
  :name "emacs-lisp-cask"
  :pipeline
  (when (file-regular-p (f-join project-root-directory "Cask"))
@@ -905,6 +964,7 @@ Calls `builder-org-babel-execute-file' on each file found by
 
 
 (builder-register-candidates
+ :no-hook t
  :name "emacs-lisp-file-isolated-check"
  :pipeline
  (when-let* ((filename (buffer-file-name))
@@ -924,6 +984,7 @@ Calls `builder-org-babel-execute-file' on each file found by
         :annotation (format "load %s in a clean subprocess" short-name)))))
 
 (builder-register-candidates
+ :no-hook t
  :name "emacs-lisp-package-isolated-test"
  :pipeline
  (when-let* ((_ (derived-mode-p 'emacs-lisp-mode))
@@ -935,6 +996,7 @@ Calls `builder-org-babel-execute-file' on each file found by
         :directory project-root-directory
         :annotation (format "run ert tests for elisp package <%s> in an isolated subprocess" display-name)))))
 (builder-register-candidates
+ :no-hook t
  :name "emacs-conf-ci-tasks"
  :pipeline
  (when-let* ((root project-root-directory)
@@ -961,6 +1023,7 @@ Calls `builder-org-babel-execute-file' on each file found by
         :annotation "run CI test suite in silex/emacs:30.2-ci docker container"))))
 
 (builder-register-candidates
+ :no-hook t
  :name "elpaish-build-tasks"
  :pipeline
  (when-let* ((root project-root-directory)

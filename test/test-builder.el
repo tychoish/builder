@@ -968,6 +968,23 @@ or a resolved-but-unsuccessful result alike."
   (should-not builder-mode)
   (should-not (memq #'builder-colorize-compilation-buffer compilation-filter-hook)))
 
+(ert-deftest builder-test/mode-managed-settings ()
+  "Enabling and disabling `builder-mode' applies and reverts managed settings."
+  (let ((compilation-scroll-output nil)
+        (compilation-max-output-line-length 500))
+    (builder-mode 1)
+    (should (eq compilation-scroll-output t))
+    (should (null compilation-max-output-line-length))
+    (builder-mode -1)
+    (should (null compilation-scroll-output))
+    (should (eq compilation-max-output-line-length 500))))
+
+(ert-deftest builder-test/candidate-functions-pre-populated ()
+  "Verify default `builder-candidate-functions' has the 24 candidate generators."
+  (should (= (length builder-candidate-functions) 24))
+  (should (memq 'builder-candidates-for-current-buffer-text-file builder-candidate-functions))
+  (should (memq 'builder-candidates-for-elpaish-build-tasks builder-candidate-functions)))
+
 (ert-deftest builder-test/compile-add-error-syntax ()
   "`builder-compile-add-error-syntax' registers pattern in alist and alist-alist."
   (builder-compile-add-error-syntax 'custom-test-syntax "^custom:\([0-9]+\)" 1 2)

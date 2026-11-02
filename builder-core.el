@@ -477,18 +477,7 @@ priority from CANDIDATES, with key length as a final tiebreaker."
   (seq-do (lambda (it) (builder--add-candidate table it))
 	   (seq-filter #'builder-candidate-p candidates)))
 
-(defvar builder-candidate-functions nil
-  "List of functions that populate a table of possible compilation commands.
-Each function is called with four arguments:
-  PROJECT-ROOT-DIRECTORY — absolute path to the project root.
-  PROJECT-NAME           — short name of the project (directory basename).
-  DIRECTORIES            — list of directories derived from open project
-                           buffers; this is what drives language-specific
-                           discovery (e.g. finding go.mod or Cargo.toml files
-                           near files the user actually has open).
-  TABLE                  — a hash table of `builder-candidate' objects;
-                           functions should call `builder--add-candidates' to
-                           populate it and return t.")
+(defvar builder-candidate-functions)
 
 (defun builder-add-candidates (fn)
   "Register FN as a candidate generator on `builder-candidate-functions'.
@@ -503,7 +492,7 @@ Use it when you have a plain `defun' and do not need predicate filtering,
 named-symbol generation, or mode-hook scoping."
   (add-hook 'builder-candidate-functions fn))
 
-(cl-defmacro builder-register-candidates (&key name (predicate t) (hooks nil) pipeline)
+(cl-defmacro builder-register-candidates (&key name (predicate t) (hooks nil) (no-hook nil) pipeline)
   "Define a named candidate generator and register it on `builder-candidate-functions'.
 NAME is used to derive the generated function symbol
 `builder-candidates-for-NAME'.  PREDICATE gates execution (default t).
@@ -511,7 +500,9 @@ PIPELINE is an expression that evaluates to a list of `builder-candidate'
 objects; it runs inside the generated function with PROJECT-ROOT-DIRECTORY,
 PROJECT-NAME, DIRECTORIES, and OPERATION-TABLE bound.
 
-When HOOKS is nil the generator is registered globally via
+When NO-HOOK is non-nil, the candidate function is defined but not registered on
+`builder-candidate-functions' (e.g. when pre-populated via `defcustom').
+When HOOKS is nil and NO-HOOK is nil, the generator is registered globally via
 `builder-add-candidates'.  When HOOKS is a list of hook symbols the generator
 is registered buffer-locally when any of those hooks fires, so candidates only
 appear for buffers of the relevant major mode.
@@ -531,13 +522,16 @@ call `builder-add-candidates'."
 	    ,pipeline))
 	 t)
 
-       ,(if (eql 0 (length hooks))
-	    `(builder-add-candidates #',symbol-name)
+       ,(cond
+         (no-hook nil)
+         ((eql 0 (length hooks))
+	  `(builder-add-candidates #',symbol-name))
+	 (t
 	  `(let ((hooks ,hooks))
 	     (defun ,hook-registering-function-name ()
 	       (add-hook 'builder-candidate-functions #',symbol-name 0 t))
 
-	     (seq-do (lambda (it) (add-hook it ',hook-registering-function-name)) hooks))))))
+	     (seq-do (lambda (it) (add-hook it ',hook-registering-function-name)) hooks)))))))
 
 (defvar-local builder--cached-candidates nil)
 
