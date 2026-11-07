@@ -510,8 +510,9 @@ timer after startup; also callable interactively for a fresh sweep."
         (setq builder--native-compile-idle-timer
               (run-with-idle-timer builder--native-compile-idle-delay t
                                     #'builder--native-compile-process-queue)))
-      (message "builder-emacs-conf-native-compile-all: queued %d .el files for incremental staleness check"
-               (length files)))))
+      (when (called-interactively-p 'interactive)
+        (message "[builder] queued %d .el files for incremental native compilation staleness check"
+                 (length files))))))
 
 (defvar bootstrap-vendored-packages nil)
 
