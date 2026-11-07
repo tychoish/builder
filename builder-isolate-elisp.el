@@ -511,7 +511,7 @@ timer after startup; also callable interactively for a fresh sweep."
               (run-with-idle-timer builder--native-compile-idle-delay t
                                     #'builder--native-compile-process-queue)))
       (when (called-interactively-p 'interactive)
-        (message "[builder] queued %d .el files for incremental native compilation staleness check"
+        (message "[builder]: queued %d .el files for incremental native compilation staleness check"
                  (length files))))))
 
 (defvar bootstrap-vendored-packages nil)
