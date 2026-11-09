@@ -53,7 +53,7 @@
   :group 'builder-mode)
 
 (defcustom builder-mode-enable-language-modes t
-  "Whether `builder-mode' enables language-specific builder minor modes on mode hooks."
+  "Whether `builder-mode' enables language-specific builder modes."
   :type 'boolean
   :group 'builder-mode)
 

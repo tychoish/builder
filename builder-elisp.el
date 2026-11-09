@@ -35,6 +35,9 @@
 (defvar package-build-recipes-dir)
 (defvar package-build-verbose)
 (defvar package-build-releases)
+(defvar byte-compile-warnings)
+(defvar checkdoc-force-docstrings-flag)
+(defvar checkdoc-spellcheck-documentation-flag)
 
 (defgroup builder-elisp nil
   "Emacs Lisp development and package tools for builder."
@@ -71,7 +74,7 @@ Omitted warnings: `free-vars', `docstrings-wide'."
   :group 'builder-elisp)
 
 (defcustom builder-elisp-checkdoc-spellcheck-documentation-flag t
-  "Value of `checkdoc-spellcheck-documentation-flag' configured by `builder-elisp-mode'."
+  "Value of `checkdoc-spellcheck-documentation-flag' in `builder-elisp-mode'."
   :type 'boolean
   :group 'builder-elisp)
 
@@ -80,7 +83,7 @@ Omitted warnings: `free-vars', `docstrings-wide'."
 
 ;;;###autoload
 (define-minor-mode builder-elisp-mode
-  "Buffer-local minor mode managing byte-compile warnings and checkdoc for Emacs Lisp."
+  "Buffer-local mode managing byte-compile warnings and checkdoc for Elisp."
   :lighter " b-elisp"
   :keymap builder-elisp-mode-map
   :group 'builder-elisp
