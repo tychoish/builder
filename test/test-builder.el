@@ -16,6 +16,90 @@
 (require 'sprite-daemon)
 (require 'sprite-direct)
 
+(defvar cov-coverage-mode nil)
+(defvar cov-lcov-file-name nil)
+(defvar cov-coverage-file-paths nil)
+(defvar builder-test-cov-mode-hook nil)
+(defvar go-ts-mode-map)
+
+(ert-deftest builder-test/coverage-configuration-lifecycle ()
+  "Builder installs configured coverage settings and restores them."
+  (let ((builder-mode nil)
+        (builder-mode--saved-settings nil)
+        (builder-coverage-modes '(builder-test-cov-mode))
+        (builder-coverage-display 'both)
+        (builder-coverage-lcov-file "my/lcov.info")
+        (builder-coverage-search-paths '("reports"))
+        (builder-test-cov-mode-hook nil)
+        (builder-mode-enable-colorization nil)
+        (builder-mode-enable-finish-alerts nil)
+        (builder-mode-override-read-command nil)
+        (builder-mode-enable-language-modes nil)
+        (compilation-error-regexp-alist nil)
+        (compilation-error-regexp-alist-alist nil)
+        (cov-coverage-mode 'previous)
+        (cov-lcov-file-name "old")
+        (cov-coverage-file-paths '("old")))
+    (unwind-protect
+        (progn
+          (builder-mode 1)
+          (builder--configure-cov)
+          (should (memq #'builder--enable-cov builder-test-cov-mode-hook))
+          (should (eq cov-coverage-mode 'both))
+          (should (equal cov-lcov-file-name "my/lcov.info"))
+          (should (equal cov-coverage-file-paths '("reports")))
+          (setq builder-coverage-modes nil)
+          (builder-mode -1)
+          (should-not (memq #'builder--enable-cov builder-test-cov-mode-hook))
+          (should (eq cov-coverage-mode 'previous))
+          (should (equal cov-lcov-file-name "old")))
+      (when builder-mode (builder-mode -1)))))
+
+(ert-deftest builder-test/go-coverage-key-lifecycle ()
+  "Builder preserves a prior Go coverage key binding."
+  (let ((go-ts-mode-map (make-sparse-keymap))
+        (builder--go-coverage-key-saved nil))
+    (keymap-set go-ts-mode-map "C-c C-t c" #'ignore)
+    (builder--install-go-coverage-key)
+    (should (eq (keymap-lookup go-ts-mode-map "C-c C-t c")
+                #'builder-go-coverage-and-convert))
+    (builder--remove-go-coverage-key)
+    (should (eq (keymap-lookup go-ts-mode-map "C-c C-t c") #'ignore))))
+
+(ert-deftest builder-test/coverage-hook-skips-missing-cov ()
+  "Missing cov is reported instead of causing a load error."
+  (let (reported)
+    (cl-letf (((symbol-function 'locate-library) (lambda (&rest _) nil))
+              ((symbol-function 'message) (lambda (format-string &rest _) (setq reported format-string))))
+      (builder--enable-cov)
+      (should (string-match-p "cov.*not installed" reported)))))
+
+(ert-deftest builder-test/go-coverage-key-preserves-later-change ()
+  "Disabling Builder leaves a subsequent user's Go binding intact."
+  (let ((go-ts-mode-map (make-sparse-keymap))
+        (builder--go-coverage-key-saved nil))
+    (builder--install-go-coverage-key)
+    (keymap-set go-ts-mode-map "C-c C-t c" #'ignore)
+    (builder--remove-go-coverage-key)
+    (should (eq (keymap-lookup go-ts-mode-map "C-c C-t c") #'ignore))))
+
+(ert-deftest builder-test/go-coverage-key-skips-occupied-prefix ()
+  "An occupied Go prefix remains unchanged and does not break setup."
+  (let ((go-ts-mode-map (make-sparse-keymap))
+        (builder--go-coverage-key-saved nil))
+    (keymap-set go-ts-mode-map "C-c C-t" #'ignore)
+    (builder--install-go-coverage-key)
+    (should (eq (keymap-lookup go-ts-mode-map "C-c C-t") #'ignore))
+    (should-not builder--go-coverage-key-saved)))
+
+(ert-deftest builder-test/coverage-hook-enables-mode ()
+  "Coverage hook explicitly enables cov-mode."
+  (let (called)
+    (cl-letf (((symbol-function 'locate-library) (lambda (&rest _) "cov.el"))
+              ((symbol-function 'cov-mode) (lambda (arg) (setq called arg))))
+      (builder--enable-cov)
+      (should (equal called 1)))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; builder-candidate struct
 

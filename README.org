@@ -85,6 +85,19 @@ Available via [[https://tychoish.github.io/elpaish/snapshot/][ELPAish]]:
   - =d=: Run =builder-change-directory= to repoint the compilation buffer.
   - =C=: Recompile with standard prompt.
 
+** Coverage
+When =builder-mode= is active, =builder-coverage-modes= controls which major
+modes automatically enable =cov-mode=.  Its default is =(go-ts-mode)=; set it
+to nil to disable automatic activation.  Customize =builder-coverage-display=,
+=builder-coverage-lcov-file=, and =builder-coverage-search-paths= to change
+the settings applied when =cov= loads.  Install =cov= separately to use this
+integration.  Change these settings before enabling =builder-mode=, or disable
+and re-enable it after changing them.
+
+In Go tree-sitter buffers, =C-c C-t c= runs
+=builder-go-coverage-and-convert=.  It writes =coverage/lcov.info= and refreshes
+coverage overlays after a successful run.
+
 ** Extending Candidate Generators
 Define new candidate generators with =builder-register-candidates=:
 
