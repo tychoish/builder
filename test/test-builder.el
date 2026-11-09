@@ -952,32 +952,47 @@ or a resolved-but-unsuccessful result alike."
 
 (ert-deftest builder-test/mode-lifecycle ()
   "Enabling and disabling `builder-mode' toggles error regexps and hooks."
-  (builder-mode -1)
-  (should-not builder-mode)
-  (should-not (memq #'builder-colorize-compilation-buffer compilation-filter-hook))
+  (let ((was-on (bound-and-true-p builder-mode)))
+    (unwind-protect
+        (progn
+          (when was-on (builder-mode -1))
+          (should-not builder-mode)
+          (should-not (memq #'builder-colorize-compilation-buffer compilation-filter-hook))
 
-  (builder-mode 1)
-  (should builder-mode)
-  (should (memq #'builder-colorize-compilation-buffer compilation-filter-hook))
-  (should (assq 'go-test compilation-error-regexp-alist-alist))
-  (should (memq 'go-test compilation-error-regexp-alist))
-  (should (assq 'rust-pretty-logfile compilation-error-regexp-alist-alist))
+          (builder-mode 1)
+          (should builder-mode)
+          (should (memq #'builder-colorize-compilation-buffer compilation-filter-hook))
+          (should (assq 'go-test compilation-error-regexp-alist-alist))
+          (should (memq 'go-test compilation-error-regexp-alist))
+          (should (assq 'rust-pretty-logfile compilation-error-regexp-alist-alist))
 
-  ;; Revert
-  (builder-mode -1)
-  (should-not builder-mode)
-  (should-not (memq #'builder-colorize-compilation-buffer compilation-filter-hook)))
+          ;; Revert
+          (builder-mode -1)
+          (should-not builder-mode)
+          (should-not (memq #'builder-colorize-compilation-buffer compilation-filter-hook)))
+      (if was-on
+          (builder-mode 1)
+        (when (bound-and-true-p builder-mode)
+          (builder-mode -1))))))
 
 (ert-deftest builder-test/mode-managed-settings ()
   "Enabling and disabling `builder-mode' applies and reverts managed settings."
-  (let ((compilation-scroll-output nil)
+  (let ((was-on (bound-and-true-p builder-mode))
+        (compilation-scroll-output nil)
         (compilation-max-output-line-length 500))
-    (builder-mode 1)
-    (should (eq compilation-scroll-output t))
-    (should (null compilation-max-output-line-length))
-    (builder-mode -1)
-    (should (null compilation-scroll-output))
-    (should (eq compilation-max-output-line-length 500))))
+    (unwind-protect
+        (progn
+          (when was-on (builder-mode -1))
+          (builder-mode 1)
+          (should (eq compilation-scroll-output t))
+          (should (null compilation-max-output-line-length))
+          (builder-mode -1)
+          (should (null compilation-scroll-output))
+          (should (eq compilation-max-output-line-length 500)))
+      (if was-on
+          (builder-mode 1)
+        (when (bound-and-true-p builder-mode)
+          (builder-mode -1))))))
 
 (ert-deftest builder-test/elisp-mode-lifecycle ()
   "Enabling `builder-elisp-mode' sets local warnings and checkdoc flags."
@@ -998,11 +1013,13 @@ or a resolved-but-unsuccessful result alike."
   "Enabling `builder-mode' registers `builder-elisp-mode' and applies warnings default."
   (require 'bytecomp)
   (require 'checkdoc)
-  (let ((builder-mode-enable-language-modes t)
+  (let ((was-on (bound-and-true-p builder-mode))
+        (builder-mode-enable-language-modes t)
         (orig-hook emacs-lisp-mode-hook)
         (orig-warnings (default-value 'byte-compile-warnings)))
     (unwind-protect
         (progn
+          (when was-on (builder-mode -1))
           (builder-mode 1)
           (should (memq #'builder-elisp-mode emacs-lisp-mode-hook))
           (should (equal (default-value 'byte-compile-warnings) builder-elisp-byte-compile-warnings))
@@ -1011,7 +1028,10 @@ or a resolved-but-unsuccessful result alike."
           (should (equal (default-value 'byte-compile-warnings) orig-warnings)))
       (setq emacs-lisp-mode-hook orig-hook)
       (set-default 'byte-compile-warnings orig-warnings)
-      (builder-mode -1))))
+      (if was-on
+          (builder-mode 1)
+        (when (bound-and-true-p builder-mode)
+          (builder-mode -1))))))
 
 (ert-deftest builder-test/candidate-functions-pre-populated ()
   "Verify default `builder-candidate-functions' has the 24 candidate generators."
