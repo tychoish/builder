@@ -41,6 +41,61 @@
   :group 'builder
   :prefix "builder-elisp-")
 
+(defcustom builder-elisp-byte-compile-warnings
+  '(callargs
+    constants
+    docstrings
+    docstrings-non-ascii-quotes
+    docstrings-control-chars
+    empty-body
+    ignored-return-value
+    interactive-only
+    lexical
+    lexical-dynamic
+    make-local
+    mutate-constant
+    noruntime
+    not-unused
+    obsolete
+    redefine
+    suspicious
+    unresolved)
+  "List of byte-compiler warnings enabled for Emacs Lisp development.
+Omitted warnings: `free-vars', `docstrings-wide'."
+  :type '(repeat symbol)
+  :group 'builder-elisp)
+
+(defcustom builder-elisp-checkdoc-force-docstrings-flag nil
+  "Value of `checkdoc-force-docstrings-flag' configured by `builder-elisp-mode'."
+  :type 'boolean
+  :group 'builder-elisp)
+
+(defcustom builder-elisp-checkdoc-spellcheck-documentation-flag t
+  "Value of `checkdoc-spellcheck-documentation-flag' configured by `builder-elisp-mode'."
+  :type 'boolean
+  :group 'builder-elisp)
+
+(defvar-keymap builder-elisp-mode-map
+  :doc "Keymap for `builder-elisp-mode'.")
+
+;;;###autoload
+(define-minor-mode builder-elisp-mode
+  "Buffer-local minor mode managing byte-compile warnings and checkdoc for Emacs Lisp."
+  :lighter " b-elisp"
+  :keymap builder-elisp-mode-map
+  :group 'builder-elisp
+  (if builder-elisp-mode
+      (progn
+        (setq-local byte-compile-warnings builder-elisp-byte-compile-warnings)
+        (setq-local checkdoc-force-docstrings-flag builder-elisp-checkdoc-force-docstrings-flag)
+        (setq-local checkdoc-spellcheck-documentation-flag builder-elisp-checkdoc-spellcheck-documentation-flag))
+    (kill-local-variable 'byte-compile-warnings)
+    (kill-local-variable 'checkdoc-force-docstrings-flag)
+    (kill-local-variable 'checkdoc-spellcheck-documentation-flag)))
+
+;;;###autoload
+(defalias 'builder-emacs-lisp-mode #'builder-elisp-mode)
+
 (defun builder-elisp-package--name (root)
   "Return the package name for the elisp project at ROOT.
 Strips a trailing \".el\" from the directory name so a project in
@@ -333,6 +388,7 @@ In batch mode exits with status 1 if any file fails to compile."
       (user-error "no <%s>.el at %s" (builder-elisp-package--name root) root))
     (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
     (let* ((load-path (cons root load-path))
+           (byte-compile-warnings builder-elisp-byte-compile-warnings)
            (failed 0))
       (dolist (it (builder-elisp-package--source-files root))
         (unless (byte-compile-file it)
@@ -354,6 +410,9 @@ In batch mode exits with status 1 if any file fails linting or compilation."
       (user-error "no <%s>.el at %s" (builder-elisp-package--name root) root))
     (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
     (let* ((load-path (cons root load-path))
+           (byte-compile-warnings builder-elisp-byte-compile-warnings)
+           (checkdoc-force-docstrings-flag builder-elisp-checkdoc-force-docstrings-flag)
+           (checkdoc-spellcheck-documentation-flag builder-elisp-checkdoc-spellcheck-documentation-flag)
            (byte-compile-error-on-warn t))
       ;; 1. Byte-compilation
       (dolist (it sources)

@@ -168,7 +168,10 @@ return a prior call's leftovers.  Never signals; safe in any process."
                 (match-string 0))
                t t))
             (write-region (point-min) (point-max) scratch nil 'silent))
-          (let* ((success (and (byte-compile-file scratch) t))
+          (let* ((byte-compile-warnings (if (boundp 'builder-elisp-byte-compile-warnings)
+                                            builder-elisp-byte-compile-warnings
+                                          byte-compile-warnings))
+                 (success (and (byte-compile-file scratch) t))
                  (log-buf (get-buffer "*Compile-Log*")))
             (cons success
                   (when log-buf

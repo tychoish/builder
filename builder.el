@@ -43,6 +43,8 @@
 ;;;###autoload (autoload 'builder-change-directory "builder-core" "Change compilation directory." t)
 ;;;###autoload (autoload 'builder-compile "builder-mode" "Run interactive compile operation." t)
 ;;;###autoload (autoload 'builder-mode "builder-mode" "Global minor mode for compilation enhancements." t)
+;;;###autoload (autoload 'builder-elisp-mode "builder-elisp" "Buffer-local mode for Emacs Lisp buffers." t)
+;;;###autoload (autoload 'builder-emacs-lisp-mode "builder-elisp" "Buffer-local mode for Emacs Lisp buffers." t)
 ;;;###autoload (autoload 'builder-elisp-package-reload "builder-elisp" "Reload an elisp package into current session." t)
 ;;;###autoload (autoload 'builder-elisp-package-test "builder-elisp" "Run tests for elisp package." t)
 ;;;###autoload (autoload 'builder-elisp-package-compile "builder-elisp" "Compile elisp package files." t)

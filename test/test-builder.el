@@ -979,6 +979,40 @@ or a resolved-but-unsuccessful result alike."
     (should (null compilation-scroll-output))
     (should (eq compilation-max-output-line-length 500))))
 
+(ert-deftest builder-test/elisp-mode-lifecycle ()
+  "Enabling `builder-elisp-mode' sets local warnings and checkdoc flags."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (builder-elisp-mode 1)
+    (should (bound-and-true-p builder-elisp-mode))
+    (should (equal byte-compile-warnings builder-elisp-byte-compile-warnings))
+    (should (eq checkdoc-force-docstrings-flag nil))
+    (should (eq checkdoc-spellcheck-documentation-flag t))
+    (builder-elisp-mode -1)
+    (should-not (bound-and-true-p builder-elisp-mode))
+    (should-not (local-variable-p 'byte-compile-warnings))
+    (should-not (local-variable-p 'checkdoc-force-docstrings-flag))
+    (should-not (local-variable-p 'checkdoc-spellcheck-documentation-flag))))
+
+(ert-deftest builder-test/mode-elisp-integration ()
+  "Enabling `builder-mode' registers `builder-elisp-mode' and applies warnings default."
+  (require 'bytecomp)
+  (require 'checkdoc)
+  (let ((builder-mode-enable-language-modes t)
+        (orig-hook emacs-lisp-mode-hook)
+        (orig-warnings (default-value 'byte-compile-warnings)))
+    (unwind-protect
+        (progn
+          (builder-mode 1)
+          (should (memq #'builder-elisp-mode emacs-lisp-mode-hook))
+          (should (equal (default-value 'byte-compile-warnings) builder-elisp-byte-compile-warnings))
+          (builder-mode -1)
+          (should-not (memq #'builder-elisp-mode emacs-lisp-mode-hook))
+          (should (equal (default-value 'byte-compile-warnings) orig-warnings)))
+      (setq emacs-lisp-mode-hook orig-hook)
+      (set-default 'byte-compile-warnings orig-warnings)
+      (builder-mode -1))))
+
 (ert-deftest builder-test/candidate-functions-pre-populated ()
   "Verify default `builder-candidate-functions' has the 24 candidate generators."
   (should (= (length builder-candidate-functions) 24))

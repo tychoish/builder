@@ -24,6 +24,13 @@
 (declare-function builder-candidate-command "builder-core" (candidate))
 (declare-function builder-compile-project "builder-core" ())
 (declare-function builder-change-directory "builder-core" ())
+(declare-function builder-elisp-mode "builder-elisp" (&optional arg))
+(defvar byte-compile-warnings)
+(defvar checkdoc-force-docstrings-flag)
+(defvar checkdoc-spellcheck-documentation-flag)
+(defvar builder-elisp-byte-compile-warnings)
+(defvar builder-elisp-checkdoc-force-docstrings-flag)
+(defvar builder-elisp-checkdoc-spellcheck-documentation-flag)
 
 (defgroup builder-mode nil
   "Compilation enhancements and global minor mode."
@@ -42,6 +49,11 @@
 
 (defcustom builder-mode-override-read-command t
   "Whether `builder-mode' advises `compilation-read-command' to use builder selection."
+  :type 'boolean
+  :group 'builder-mode)
+
+(defcustom builder-mode-enable-language-modes t
+  "Whether `builder-mode' enables language-specific builder minor modes on mode hooks."
   :type 'boolean
   :group 'builder-mode)
 
@@ -136,7 +148,28 @@ COMMAND is the default compile command string."
           (val (cdr pair)))
       (push (cons sym (if (boundp sym) (cons t (symbol-value sym)) (cons nil nil)))
             builder-mode--saved-settings)
-      (set sym val))))
+      (set sym val)))
+  (when (boundp 'builder-elisp-byte-compile-warnings)
+    (push (cons 'byte-compile-warnings
+                (if (boundp 'byte-compile-warnings)
+                    (cons t (default-value 'byte-compile-warnings))
+                  (cons nil nil)))
+          builder-mode--saved-settings)
+    (setq-default byte-compile-warnings builder-elisp-byte-compile-warnings))
+  (when (boundp 'builder-elisp-checkdoc-force-docstrings-flag)
+    (push (cons 'checkdoc-force-docstrings-flag
+                (if (boundp 'checkdoc-force-docstrings-flag)
+                    (cons t (default-value 'checkdoc-force-docstrings-flag))
+                  (cons nil nil)))
+          builder-mode--saved-settings)
+    (setq-default checkdoc-force-docstrings-flag builder-elisp-checkdoc-force-docstrings-flag))
+  (when (boundp 'builder-elisp-checkdoc-spellcheck-documentation-flag)
+    (push (cons 'checkdoc-spellcheck-documentation-flag
+                (if (boundp 'checkdoc-spellcheck-documentation-flag)
+                    (cons t (default-value 'checkdoc-spellcheck-documentation-flag))
+                  (cons nil nil)))
+          builder-mode--saved-settings)
+    (setq-default checkdoc-spellcheck-documentation-flag builder-elisp-checkdoc-spellcheck-documentation-flag)))
 
 (defun builder-mode--revert-settings ()
   "Restore variables to their state prior to `builder-mode'."
@@ -144,7 +177,7 @@ COMMAND is the default compile command string."
     (let ((sym (car entry))
           (status (cdr entry)))
       (if (car status)
-          (set sym (cdr status))
+          (set-default sym (cdr status))
         (makunbound sym))))
   (setq builder-mode--saved-settings nil))
 
@@ -179,7 +212,11 @@ COMMAND is the default compile command string."
 
         ;; 6. Advice on compilation-read-command
         (when builder-mode-override-read-command
-          (advice-add 'compilation-read-command :override #'builder-compilation-read-command)))
+          (advice-add 'compilation-read-command :override #'builder-compilation-read-command))
+
+        ;; 7. Language mode hooks
+        (when builder-mode-enable-language-modes
+          (add-hook 'emacs-lisp-mode-hook #'builder-elisp-mode)))
 
     ;; Disabling mode
     (when builder-mode-enable-colorization
@@ -188,6 +225,8 @@ COMMAND is the default compile command string."
       (remove-hook 'compilation-finish-functions #'builder-alert-after-finish-in-background))
     (when builder-mode-override-read-command
       (advice-remove 'compilation-read-command #'builder-compilation-read-command))
+    (when builder-mode-enable-language-modes
+      (remove-hook 'emacs-lisp-mode-hook #'builder-elisp-mode))
     (builder-mode--revert-settings)))
 
 (provide 'builder-mode)
