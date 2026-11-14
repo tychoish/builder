@@ -89,7 +89,7 @@ Omitted warnings: `free-vars', `docstrings-wide'."
 
 ;;;###autoload
 (define-minor-mode builder-elisp-mode
-  "Buffer-local mode managing byte-compile warnings and checkdoc for Elisp."
+  "Buffer-local mode managing byte-compile warnings, checkdoc, and ERT settings for Elisp."
   :lighter " b-elisp"
   :keymap builder-elisp-mode-map
   :group 'builder-elisp
@@ -97,13 +97,20 @@ Omitted warnings: `free-vars', `docstrings-wide'."
       (progn
         (setq-local byte-compile-warnings builder-elisp-byte-compile-warnings)
         (setq-local checkdoc-force-docstrings-flag builder-elisp-checkdoc-force-docstrings-flag)
-        (setq-local checkdoc-spellcheck-documentation-flag builder-elisp-checkdoc-spellcheck-documentation-flag))
+        (setq-local checkdoc-spellcheck-documentation-flag builder-elisp-checkdoc-spellcheck-documentation-flag)
+        (when builder-elisp-ert-prevent-focus
+          (builder-elisp-enable-ert-advice)))
     (kill-local-variable 'byte-compile-warnings)
     (kill-local-variable 'checkdoc-force-docstrings-flag)
     (kill-local-variable 'checkdoc-spellcheck-documentation-flag)))
 
 ;;;###autoload
+(defalias 'builder-elisp-minor-mode #'builder-elisp-mode)
+(defvaralias 'builder-elisp-minor-mode 'builder-elisp-mode)
+
+;;;###autoload
 (defalias 'builder-emacs-lisp-mode #'builder-elisp-mode)
+(defvaralias 'builder-emacs-lisp-mode 'builder-elisp-mode)
 
 (defun builder-elisp-package--name (root)
   "Return the package name for the elisp project at ROOT.
@@ -408,8 +415,18 @@ ORIG-FN and ARGS identify the original ERT invocation."
                        (funcall original-pop buffer-or-name action norecord)))))
           (apply orig-fn args))))))
 
-(advice-add 'ert--results-update-stats-display :around #'builder--ert-results-update-stats-display-advice)
-(advice-add 'ert-run-tests-interactively :around #'builder--ert-no-focus-advice)
+(defun builder-elisp-enable-ert-advice ()
+  "Enable ERT focus-prevention and EWOC buffer advice."
+  (advice-add 'ert--results-update-stats-display :around #'builder--ert-results-update-stats-display-advice)
+  (advice-add 'ert-run-tests-interactively :around #'builder--ert-no-focus-advice))
+
+(defun builder-elisp-disable-ert-advice ()
+  "Disable ERT focus-prevention and EWOC buffer advice."
+  (advice-remove 'ert--results-update-stats-display #'builder--ert-results-update-stats-display-advice)
+  (advice-remove 'ert-run-tests-interactively #'builder--ert-no-focus-advice))
+
+(when builder-elisp-ert-prevent-focus
+  (builder-elisp-enable-ert-advice))
 
 ;;;###autoload
 (defun builder-elisp-package-compile ()

@@ -1139,6 +1139,23 @@ or a resolved-but-unsuccessful result alike."
     (should-not (local-variable-p 'checkdoc-force-docstrings-flag))
     (should-not (local-variable-p 'checkdoc-spellcheck-documentation-flag))))
 
+(ert-deftest builder-test/elisp-minor-mode-alias-lifecycle ()
+  "Enabling `builder-elisp-minor-mode' sets local warnings, checkdoc, and mode flags."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (builder-elisp-minor-mode 1)
+    (should (bound-and-true-p builder-elisp-minor-mode))
+    (should (bound-and-true-p builder-elisp-mode))
+    (should (equal byte-compile-warnings builder-elisp-byte-compile-warnings))
+    (should (eq checkdoc-force-docstrings-flag nil))
+    (should (eq checkdoc-spellcheck-documentation-flag t))
+    (builder-elisp-minor-mode -1)
+    (should-not (bound-and-true-p builder-elisp-minor-mode))
+    (should-not (bound-and-true-p builder-elisp-mode))
+    (should-not (local-variable-p 'byte-compile-warnings))
+    (should-not (local-variable-p 'checkdoc-force-docstrings-flag))
+    (should-not (local-variable-p 'checkdoc-spellcheck-documentation-flag))))
+
 (ert-deftest builder-test/mode-elisp-integration ()
   "Enabling `builder-mode' registers `builder-elisp-mode' and applies warnings default."
   (require 'bytecomp)
