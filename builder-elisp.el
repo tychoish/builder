@@ -103,9 +103,10 @@ Omitted warnings: `free-vars', `docstrings-wide'."
     (kill-local-variable 'byte-compile-warnings)
     (kill-local-variable 'checkdoc-force-docstrings-flag)
     (kill-local-variable 'checkdoc-spellcheck-documentation-flag)
-    (unless (seq-some (lambda (buf)
-                        (buffer-local-value 'builder-elisp-mode buf))
-                      (buffer-list))
+    (unless (or (bound-and-true-p builder-mode)
+                (seq-some (lambda (buf)
+                            (buffer-local-value 'builder-elisp-mode buf))
+                          (buffer-list)))
       (builder-elisp-disable-ert-advice))))
 
 (defun builder-elisp-package--name (root)

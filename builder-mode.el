@@ -29,7 +29,10 @@
 (declare-function builder-compile-project "builder-core" ())
 (declare-function builder-change-directory "builder-core" ())
 (declare-function builder-elisp-mode "builder-elisp" (&optional arg))
+(declare-function builder-elisp-enable-ert-advice "builder-elisp" ())
+(declare-function builder-elisp-disable-ert-advice "builder-elisp" ())
 (defvar builder-mode)
+(defvar builder-elisp-ert-prevent-focus)
 (defvar go-ts-mode-map)
 (defvar cov-coverage-mode)
 (defvar cov-lcov-file-name)
@@ -282,9 +285,11 @@ COMMAND is the default compile command string."
         (seq-do (lambda (hook) (add-hook hook #'builder--enable-cov))
                 builder--coverage-hooks)
 
-        ;; 8. Language mode hooks
+        ;; 8. Language mode hooks and ERT advice
         (when builder-mode-enable-language-modes
-          (add-hook 'emacs-lisp-mode-hook #'builder-elisp-mode)))
+          (add-hook 'emacs-lisp-mode-hook #'builder-elisp-mode)
+          (when (bound-and-true-p builder-elisp-ert-prevent-focus)
+            (builder-elisp-enable-ert-advice))))
 
     ;; Disabling mode
     (when (boundp 'go-ts-mode-map)
@@ -299,7 +304,11 @@ COMMAND is the default compile command string."
     (when builder-mode-override-read-command
       (advice-remove 'compilation-read-command #'builder-compilation-read-command))
     (when builder-mode-enable-language-modes
-      (remove-hook 'emacs-lisp-mode-hook #'builder-elisp-mode))
+      (remove-hook 'emacs-lisp-mode-hook #'builder-elisp-mode)
+      (unless (seq-some (lambda (buf)
+                          (buffer-local-value 'builder-elisp-mode buf))
+                        (buffer-list))
+        (builder-elisp-disable-ert-advice)))
     (builder-mode--revert-settings)))
 
 (provide 'builder-mode)

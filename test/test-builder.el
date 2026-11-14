@@ -1152,6 +1152,7 @@ or a resolved-but-unsuccessful result alike."
           (when was-on (builder-mode -1))
           (builder-mode 1)
           (should (memq #'builder-elisp-mode emacs-lisp-mode-hook))
+          (should (advice-member-p #'builder--ert-no-focus-advice 'ert-run-tests-interactively))
           ;; builder-mode does not pollute the global default of byte-compile-warnings
           (should (equal (default-value 'byte-compile-warnings) orig-warnings))
           ;; In an emacs-lisp-mode buffer, builder-elisp-mode is activated and sets local warnings
@@ -1160,7 +1161,8 @@ or a resolved-but-unsuccessful result alike."
             (should (bound-and-true-p builder-elisp-mode))
             (should (equal byte-compile-warnings builder-elisp-byte-compile-warnings)))
           (builder-mode -1)
-          (should-not (memq #'builder-elisp-mode emacs-lisp-mode-hook)))
+          (should-not (memq #'builder-elisp-mode emacs-lisp-mode-hook))
+          (should-not (advice-member-p #'builder--ert-no-focus-advice 'ert-run-tests-interactively)))
       (setq emacs-lisp-mode-hook orig-hook)
       (if was-on
           (builder-mode 1)
