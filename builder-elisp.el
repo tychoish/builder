@@ -29,6 +29,7 @@
 (require 'builder-core)
 
 (declare-function lm-header "lisp-mnt")
+(declare-function ewoc-buffer "ewoc" (ewoc))
 (declare-function package-build-archive "package-build")
 (defvar package-build-working-dir)
 (defvar package-build-archive-dir)
@@ -75,6 +76,11 @@ Omitted warnings: `free-vars', `docstrings-wide'."
 
 (defcustom builder-elisp-checkdoc-spellcheck-documentation-flag t
   "Value of `checkdoc-spellcheck-documentation-flag' in `builder-elisp-mode'."
+  :type 'boolean
+  :group 'builder-elisp)
+
+(defcustom builder-elisp-ert-prevent-focus t
+  "Whether to prevent interactive ERT runs from stealing window focus."
   :type 'boolean
   :group 'builder-elisp)
 
@@ -379,6 +385,31 @@ instead of literal characters."
     (builder--ert-run-tests-matching
      (lambda (name) (string-match-p regexp name))
      (format "glob %S" pattern))))
+
+(defun builder--ert-results-update-stats-display-advice (orig-fn ewoc stats)
+  "Ensure `ert--results-update-stats-display' executes in the EWOC buffer.
+ORIG-FN is called with EWOC and STATS."
+  (with-current-buffer (ewoc-buffer ewoc)
+    (funcall orig-fn ewoc stats)))
+
+(defun builder--ert-no-focus-advice (orig-fn &rest args)
+  "Run ERT without letting the results buffer or tests steal window focus.
+ORIG-FN and ARGS identify the original ERT invocation."
+  (if (not builder-elisp-ert-prevent-focus)
+      (apply orig-fn args)
+    (save-selected-window
+      (let ((original-pop (symbol-function 'pop-to-buffer)))
+        (cl-letf (((symbol-function 'pop-to-buffer)
+                   (lambda (buffer-or-name &optional action norecord)
+                     (if (and (get-buffer buffer-or-name)
+                              (with-current-buffer buffer-or-name
+                                (derived-mode-p 'ert-results-mode)))
+                         (display-buffer buffer-or-name action)
+                       (funcall original-pop buffer-or-name action norecord)))))
+          (apply orig-fn args))))))
+
+(advice-add 'ert--results-update-stats-display :around #'builder--ert-results-update-stats-display-advice)
+(advice-add 'ert-run-tests-interactively :around #'builder--ert-no-focus-advice)
 
 ;;;###autoload
 (defun builder-elisp-package-compile ()

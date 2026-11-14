@@ -815,6 +815,52 @@ or a resolved-but-unsuccessful result alike."
           (should (cl-some (lambda (k) (string-match-p "test-project-ert-all" k)) (hash-table-keys tbl))))
       (delete-directory temp-dir t))))
 
+(ert-deftest builder-test/ert-results-update-stats-display-advice ()
+  "Ensure `builder--ert-results-update-stats-display-advice' switches to ewoc buffer."
+  (let* ((buf (generate-new-buffer " *builder-test-ewoc*"))
+         (mock-ewoc (cons 'mock-ewoc buf))
+         called-in-buf)
+    (unwind-protect
+        (cl-letf (((symbol-function 'ewoc-buffer) (lambda (ewoc) (cdr ewoc))))
+          (builder--ert-results-update-stats-display-advice
+           (lambda (_ewoc _stats)
+             (setq called-in-buf (current-buffer)))
+           mock-ewoc
+           'dummy-stats)
+          (should (eq called-in-buf buf)))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest builder-test/ert-no-focus-advice ()
+  "Ensure `builder--ert-no-focus-advice' preserves selected window and intercepts pop-to-buffer."
+  (let* ((orig-window (selected-window))
+         (results-buf (generate-new-buffer "*ert-test-results*"))
+         (normal-buf (generate-new-buffer "*normal-buf*"))
+         pop-called-with
+         display-called-with)
+    (unwind-protect
+        (with-current-buffer results-buf
+          (ert-results-mode)
+          (cl-letf (((symbol-function 'display-buffer)
+                     (lambda (buf &optional _action)
+                       (setq display-called-with buf)
+                       nil))
+                    ((symbol-function 'pop-to-buffer)
+                     (lambda (buf &optional _action _norecord)
+                       (setq pop-called-with buf)
+                       nil)))
+            (builder--ert-no-focus-advice
+             (lambda ()
+               (pop-to-buffer results-buf)
+               (pop-to-buffer normal-buf)))
+            (should (eq display-called-with results-buf))
+            (should (eq pop-called-with normal-buf))
+            (should (eq (selected-window) orig-window))))
+      (when (buffer-live-p results-buf)
+        (kill-buffer results-buf))
+      (when (buffer-live-p normal-buf)
+        (kill-buffer normal-buf)))))
+
 (ert-deftest builder-test/elisp-package-reload-success ()
   "Test that `builder-elisp-package-reload' loads and reloads package definitions."
   (let* ((temp-dir (make-temp-file "builder-pkg-test-" t))
