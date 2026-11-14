@@ -34,12 +34,6 @@
 (defvar cov-coverage-mode)
 (defvar cov-lcov-file-name)
 (defvar cov-coverage-file-paths)
-(defvar byte-compile-warnings)
-(defvar checkdoc-force-docstrings-flag)
-(defvar checkdoc-spellcheck-documentation-flag)
-(defvar builder-elisp-byte-compile-warnings)
-(defvar builder-elisp-checkdoc-force-docstrings-flag)
-(defvar builder-elisp-checkdoc-spellcheck-documentation-flag)
 
 (defgroup builder-mode nil
   "Compilation enhancements and global minor mode."
@@ -232,28 +226,7 @@ COMMAND is the default compile command string."
           (val (cdr pair)))
       (push (cons sym (if (boundp sym) (cons t (symbol-value sym)) (cons nil nil)))
             builder-mode--saved-settings)
-      (set sym val)))
-  (when (boundp 'builder-elisp-byte-compile-warnings)
-    (push (cons 'byte-compile-warnings
-                (if (boundp 'byte-compile-warnings)
-                    (cons t (default-value 'byte-compile-warnings))
-                  (cons nil nil)))
-          builder-mode--saved-settings)
-    (setq-default byte-compile-warnings builder-elisp-byte-compile-warnings))
-  (when (boundp 'builder-elisp-checkdoc-force-docstrings-flag)
-    (push (cons 'checkdoc-force-docstrings-flag
-                (if (boundp 'checkdoc-force-docstrings-flag)
-                    (cons t (default-value 'checkdoc-force-docstrings-flag))
-                  (cons nil nil)))
-          builder-mode--saved-settings)
-    (setq-default checkdoc-force-docstrings-flag builder-elisp-checkdoc-force-docstrings-flag))
-  (when (boundp 'builder-elisp-checkdoc-spellcheck-documentation-flag)
-    (push (cons 'checkdoc-spellcheck-documentation-flag
-                (if (boundp 'checkdoc-spellcheck-documentation-flag)
-                    (cons t (default-value 'checkdoc-spellcheck-documentation-flag))
-                  (cons nil nil)))
-          builder-mode--saved-settings)
-    (setq-default checkdoc-spellcheck-documentation-flag builder-elisp-checkdoc-spellcheck-documentation-flag)))
+      (set sym val))))
 
 (defun builder-mode--revert-settings ()
   "Restore variables to their state prior to `builder-mode'."

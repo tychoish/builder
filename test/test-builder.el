@@ -1139,25 +1139,8 @@ or a resolved-but-unsuccessful result alike."
     (should-not (local-variable-p 'checkdoc-force-docstrings-flag))
     (should-not (local-variable-p 'checkdoc-spellcheck-documentation-flag))))
 
-(ert-deftest builder-test/elisp-minor-mode-alias-lifecycle ()
-  "Enabling `builder-elisp-minor-mode' sets local warnings, checkdoc, and mode flags."
-  (with-temp-buffer
-    (emacs-lisp-mode)
-    (builder-elisp-minor-mode 1)
-    (should (bound-and-true-p builder-elisp-minor-mode))
-    (should (bound-and-true-p builder-elisp-mode))
-    (should (equal byte-compile-warnings builder-elisp-byte-compile-warnings))
-    (should (eq checkdoc-force-docstrings-flag nil))
-    (should (eq checkdoc-spellcheck-documentation-flag t))
-    (builder-elisp-minor-mode -1)
-    (should-not (bound-and-true-p builder-elisp-minor-mode))
-    (should-not (bound-and-true-p builder-elisp-mode))
-    (should-not (local-variable-p 'byte-compile-warnings))
-    (should-not (local-variable-p 'checkdoc-force-docstrings-flag))
-    (should-not (local-variable-p 'checkdoc-spellcheck-documentation-flag))))
-
 (ert-deftest builder-test/mode-elisp-integration ()
-  "Enabling `builder-mode' registers `builder-elisp-mode' and applies warnings default."
+  "Enabling `builder-mode' registers `builder-elisp-mode' on `emacs-lisp-mode-hook'."
   (require 'bytecomp)
   (require 'checkdoc)
   (let ((was-on (bound-and-true-p builder-mode))
@@ -1169,12 +1152,16 @@ or a resolved-but-unsuccessful result alike."
           (when was-on (builder-mode -1))
           (builder-mode 1)
           (should (memq #'builder-elisp-mode emacs-lisp-mode-hook))
-          (should (equal (default-value 'byte-compile-warnings) builder-elisp-byte-compile-warnings))
+          ;; builder-mode does not pollute the global default of byte-compile-warnings
+          (should (equal (default-value 'byte-compile-warnings) orig-warnings))
+          ;; In an emacs-lisp-mode buffer, builder-elisp-mode is activated and sets local warnings
+          (with-temp-buffer
+            (emacs-lisp-mode)
+            (should (bound-and-true-p builder-elisp-mode))
+            (should (equal byte-compile-warnings builder-elisp-byte-compile-warnings)))
           (builder-mode -1)
-          (should-not (memq #'builder-elisp-mode emacs-lisp-mode-hook))
-          (should (equal (default-value 'byte-compile-warnings) orig-warnings)))
+          (should-not (memq #'builder-elisp-mode emacs-lisp-mode-hook)))
       (setq emacs-lisp-mode-hook orig-hook)
-      (set-default 'byte-compile-warnings orig-warnings)
       (if was-on
           (builder-mode 1)
         (when (bound-and-true-p builder-mode)
