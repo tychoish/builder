@@ -513,8 +513,9 @@ The recipe is generated at build time and uses a file:// URL pointing at the
 local repository, so the package contents reflect HEAD; uncommitted changes
 are not included. The tarball lands in <root>/build/packages/."
   (interactive)
-  (require 'package-build)
-  (require 'package-recipe)
+  (unless (and (require 'package-build nil t)
+               (require 'package-recipe nil t))
+    (user-error "package-build is required to build package archives"))
   (pcase-let ((`(,root ,name ,_main-file) (builder-elisp-package--resolve nil t)))
     (unless (file-directory-p (f-join root ".git"))
       (user-error "package build requires a git repository at %s" root))
