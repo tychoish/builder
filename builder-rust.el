@@ -53,40 +53,42 @@ Defaults to `default-directory'."
 (defun builder-rust-packages (&optional dir)
   "Return a list of package names in the Rust workspace or project for DIR."
   (when-let* ((root (builder-rust-root dir)))
-    (let (packages)
-      (dolist (cargo-file (directory-files-recursively root "\\`Cargo\\.toml\\'"))
-        (with-temp-buffer
-          (insert-file-contents cargo-file)
-          (goto-char (point-min))
-          (when (re-search-forward "^\\[package\\]" nil t)
-            (when (re-search-forward "^name[ \t]*=[ \t]*\"\\([^\"]+\\)\"" nil t)
-              (push (match-string 1) packages)))))
-      (nreverse (delete-dups packages)))))
+    (thread-last (directory-files-recursively root "\\`Cargo\\.toml\\'")
+                 (seq-keep (lambda (cargo-file)
+                             (with-temp-buffer
+                               (insert-file-contents cargo-file)
+                               (goto-char (point-min))
+                               (when (and (re-search-forward "^\\[package\\]" nil t)
+                                          (re-search-forward "^name[ \t]*=[ \t]*\"\\([^\"]+\\)\"" nil t))
+                                 (match-string 1)))))
+                 seq-uniq)))
 
 (defun builder-rust-binaries (&optional dir)
   "Return a list of binary names in the Rust project for DIR."
   (when-let* ((root (builder-rust-root dir)))
     (let (binaries)
       ;; 1. Check [[bin]] in Cargo.toml files
-      (dolist (cargo-file (directory-files-recursively root "\\`Cargo\\.toml\\'"))
-        (with-temp-buffer
-          (insert-file-contents cargo-file)
-          (goto-char (point-min))
-          (while (re-search-forward "^\\[\\[bin\\]\\]" nil t)
-            (when (re-search-forward "^name[ \t]*=[ \t]*\"\\([^\"]+\\)\"" nil t)
-              (push (match-string 1) binaries)))))
+      (seq-do (lambda (cargo-file)
+                (with-temp-buffer
+                  (insert-file-contents cargo-file)
+                  (goto-char (point-min))
+                  (while (re-search-forward "^\\[\\[bin\\]\\]" nil t)
+                    (when (re-search-forward "^name[ \t]*=[ \t]*\"\\([^\"]+\\)\"" nil t)
+                      (push (match-string 1) binaries)))))
+              (directory-files-recursively root "\\`Cargo\\.toml\\'"))
       ;; 2. Check src/bin/*.rs and src/main.rs
-      (dolist (rs-file (directory-files-recursively root "\\`main\\.rs\\'"))
-        (let* ((src-dir (f-parent rs-file))
-               (crate-dir (f-parent src-dir))
-               (manifest (f-join crate-dir "Cargo.toml")))
-          (when (f-exists-p manifest)
-            (with-temp-buffer
-              (insert-file-contents manifest)
-              (goto-char (point-min))
-              (when (re-search-forward "^name[ \t]*=[ \t]*\"\\([^\"]+\\)\"" nil t)
-                (push (match-string 1) binaries))))))
-      (nreverse (delete-dups binaries)))))
+      (seq-do (lambda (rs-file)
+                (let* ((src-dir (f-parent rs-file))
+                       (crate-dir (f-parent src-dir))
+                       (manifest (f-join crate-dir "Cargo.toml")))
+                  (when (f-exists-p manifest)
+                    (with-temp-buffer
+                      (insert-file-contents manifest)
+                      (goto-char (point-min))
+                      (when (re-search-forward "^name[ \t]*=[ \t]*\"\\([^\"]+\\)\"" nil t)
+                        (push (match-string 1) binaries))))))
+              (directory-files-recursively root "\\`main\\.rs\\'"))
+      (seq-uniq (nreverse binaries)))))
 
 (provide 'builder-rust)
 ;;; builder-rust.el ends here

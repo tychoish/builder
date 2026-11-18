@@ -330,7 +330,7 @@
   (mcpkit-start-service 'builder :on-collision 'namespace))
 
 (defun builder-mcp-call-tool (tool-name &optional args)
-  "Call MCP tool TOOL-NAME on service 'builder with ARGS."
+  "Call MCP tool TOOL-NAME on service \\='builder with ARGS."
   (let* ((service (mcpkit-get-service 'builder))
          (tool-str (if (symbolp tool-name) (symbol-name tool-name) tool-name))
          (tool (map-elt (mcpkit-service-tools service) tool-str))

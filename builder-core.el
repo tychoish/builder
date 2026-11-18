@@ -29,7 +29,14 @@
 (require 'annotated-completing-read)
 
 (declare-function alert "alert" (message &rest args))
-(defvar sprite-instance-id (or (bound-and-true-p sprite-instance-id) (system-name)))
+(declare-function async-start-process "async" (name program finish-func &rest program-args))
+(declare-function mode-buffers "xtd-project" (mode &optional buffer-list))
+(declare-function mode-buffers-for-project "xtd-project" (&key project mode))
+(defvar sprite-instance-id)
+
+(defun builder--instance-id ()
+  "Return `sprite-instance-id' when bound and non-nil, else `system-name'."
+  (or (bound-and-true-p sprite-instance-id) (system-name)))
 
 (defgroup builder nil
   "Compilation buffer and command runner."
@@ -204,14 +211,14 @@ BUFFER-NAME specifies an optional custom compilation buffer name."
 	     (pa "emacs-process-name" :is process-name)
 	     (pa "program" :is program)
 	     (pa "on-finish" :is (lambda (out) (message "INFO: notify process for %s completed [%s] with %s" (buffer-name buffer) out compile-result-message)))
-	     (append args (-strings (format "<%s> %s -- %s" sprite-instance-id (buffer-name buffer) msg)))))
+	     (append args (-strings (format "<%s> %s -- %s" (builder--instance-id) (buffer-name buffer) msg)))))
 
     (when (or send-when
 	      (> (/ alert-threshold 2) (float-time (time-since (current-idle-time))))
 	      (> alert-threshold (ffloor (float-time duration))))
       (alert
        msg
-       :title (format "%s:%s:%s" sprite-instance-id (buffer-name buffer) compile-result-message)
+       :title (format "%s:%s:%s" (builder--instance-id) (buffer-name buffer) compile-result-message)
        :buffer buffer))
 
     (with-current-buffer buffer
@@ -404,13 +411,14 @@ priority from CANDIDATES, with key length as a final tiebreaker."
     (when name
       (cl-pushnew name default-names :test #'equal))
 
-    (dolist (it default-names)
-      (let ((name (format "*%s-%s*" project it)))
-        (if (map-contains-key buffer-table name)
-            (setf (map-elt buffer-table (generate-new-buffer-name name))
-                  (format "new %s buffer for project %s" name project))
-          (setf (map-elt buffer-table name)
-                (format "create default compilation buffer for %s" project)))))
+    (seq-do (lambda (it)
+              (let ((name (format "*%s-%s*" project it)))
+                (if (map-contains-key buffer-table name)
+                    (setf (map-elt buffer-table (generate-new-buffer-name name))
+                          (format "new %s buffer for project %s" name project))
+                  (setf (map-elt buffer-table name)
+                        (format "create default compilation buffer for %s" project)))))
+            default-names)
 
     buffer-table))
 
@@ -418,13 +426,19 @@ priority from CANDIDATES, with key length as a final tiebreaker."
 
 ;; compilation candidate struct and table operations
 
+(defun builder--truncate-command (command)
+  "Truncate COMMAND to at most 32 characters with a trailing ellipsis."
+  (if (> (length command) 32)
+      (concat (substring command 0 29) "...")
+    command))
+
 (cl-defstruct (builder-candidate
                (:constructor nil)
                (:constructor make-builder-candidate
 			     (&key id
 				   action
 				   command
-				   (name (if (> (length command) 32) (concat (substring command 0 29) "...") command))
+				   (name (builder--truncate-command command))
 				   (directory default-directory)
 				   (annotation (if (not (string-equal command name))
 						   (format "'%s' in %s" command (f-abbrev directory))
@@ -562,7 +576,7 @@ call `builder-add-candidates'."
 	(builder--add-candidate
 	 operation-table
 	 (make-builder-candidate
-	  :name (if (> (length command) 32) (concat (substring command 0 29) "...") command)
+	  :name (builder--truncate-command command)
 	  :command command
 	  :annotation "runtime suggested candidate"
 	  :directory (or directory project-root-directory default-directory))))

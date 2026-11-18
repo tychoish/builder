@@ -121,7 +121,7 @@ Each function is called with four arguments:
 			 (source (cdr it))
 			 (annotation-tag (if (string-equal default-directory project-root-directory) "project root" "working directory")))
 		     (make-builder-candidate
-		      :name (if (> (length command) 32) (concat (substring command 0 29) "...") command)
+		      :name (builder--truncate-command command)
 		      :command command
 		      :directory project-root-directory
 		      :annotation (format "operation from `%s' in the %s (%s)" source annotation-tag default-directory)
@@ -236,16 +236,17 @@ Looks for `go.work` first, then `go.mod`."
 
 (defun builder-go-coverage--refresh-buffers (root)
   "Refresh `cov-mode` overlays in open Go buffers under ROOT."
-  (dolist (buf (buffer-list))
-    (with-current-buffer buf
-      (when (and (derived-mode-p 'go-mode 'go-ts-mode)
-                 (buffer-file-name)
-                 (file-in-directory-p (buffer-file-name) root))
-        (if (bound-and-true-p cov-mode)
-            (when (fboundp 'cov-update)
-              (cov-update))
-          (when (fboundp 'cov-turn-on)
-            (cov-turn-on)))))))
+  (seq-do (lambda (buf)
+            (with-current-buffer buf
+              (when (and (derived-mode-p 'go-mode 'go-ts-mode)
+                         (buffer-file-name)
+                         (file-in-directory-p (buffer-file-name) root))
+                (if (bound-and-true-p cov-mode)
+                    (when (fboundp 'cov-update)
+                      (cov-update))
+                  (when (fboundp 'cov-turn-on)
+                    (cov-turn-on))))))
+          (buffer-list)))
 
 ;;;###autoload
 (defun builder-go-coverage-and-convert (&optional target directory)
@@ -680,13 +681,13 @@ Signals `user-error` if not in a Go module/project or if `go` or
 			      (candidates (split-string output)))
 		    candidates))))
 	     (f-directories-containing-file-justfile directories)))
-(defun builder--vale-insert-statistics (buffer _message &key filename)
+(cl-defun builder--vale-insert-statistics (buffer _message &key filename)
   (interactive)
   (let* ((table (json-parse-string (shell-command-to-string (format "vale ls-metrics --output=line %s" filename)))))
     (with-current-buffer buffer
       (insert (format "\nstatistics for %s" (propertize (f-collapse-homedir filename) 'face 'italic)))
       (map-do (lambda (key value) (insert (format "\n%s:%s" (propertize key 'face 'bold) value)))
-	      table))))
+              table))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
