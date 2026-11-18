@@ -9,6 +9,8 @@
 
 (require 'ert)
 (require 'cl-lib)
+(require 'seq)
+(require 'map)
 (require 'subr-x)
 
 (require 'builder)
@@ -31,6 +33,8 @@
         (builder-coverage-lcov-file "my/lcov.info")
         (builder-coverage-search-paths '("reports"))
         (builder-test-cov-mode-hook nil)
+        (cov-mode-hook nil)
+        (go-ts-mode-hook nil)
         (builder-mode-enable-colorization nil)
         (builder-mode-enable-finish-alerts nil)
         (builder-mode-override-read-command nil)
@@ -43,6 +47,8 @@
     (unwind-protect
         (progn
           (builder-mode 1)
+          (should (memq #'builder--configure-cov cov-mode-hook))
+          (should (memq #'builder--install-go-coverage-key go-ts-mode-hook))
           (builder--configure-cov)
           (should (memq #'builder--enable-cov builder-test-cov-mode-hook))
           (should (eq cov-coverage-mode 'both))
@@ -50,6 +56,8 @@
           (should (equal cov-coverage-file-paths '("reports")))
           (setq builder-coverage-modes nil)
           (builder-mode -1)
+          (should-not (memq #'builder--configure-cov cov-mode-hook))
+          (should-not (memq #'builder--install-go-coverage-key go-ts-mode-hook))
           (should-not (memq #'builder--enable-cov builder-test-cov-mode-hook))
           (should (eq cov-coverage-mode 'previous))
           (should (equal cov-lcov-file-name "old")))
@@ -185,8 +193,8 @@
   (let ((tbl (make-hash-table :test #'equal))
         (c (make-builder-candidate :command "make" :name "build")))
     (builder--add-candidate tbl c)
-    (should (gethash "build" tbl))
-    (should (eq c (gethash "build" tbl)))))
+    (should (map-elt tbl "build"))
+    (should (eq c (map-elt tbl "build")))))
 
 (ert-deftest builder-test/add-candidate-overwrites-existing ()
   "Adding a candidate with an existing name replaces the previous entry."
@@ -195,15 +203,15 @@
         (c2 (make-builder-candidate :command "make -j4" :name "build")))
     (builder--add-candidate tbl c1)
     (builder--add-candidate tbl c2)
-    (should (eq c2 (gethash "build" tbl)))))
+    (should (eq c2 (map-elt tbl "build")))))
 
 (ert-deftest builder-test/add-candidates-filters-non-candidates ()
   "Non-candidate values in the list are silently ignored."
   (let ((tbl (make-hash-table :test #'equal))
         (c (make-builder-candidate :command "make" :name "build")))
     (builder--add-candidates tbl (list c nil "not-a-candidate" 42))
-    (should (= 1 (hash-table-count tbl)))
-    (should (gethash "build" tbl))))
+    (should (= 1 (map-length tbl)))
+    (should (map-elt tbl "build"))))
 
 (ert-deftest builder-test/add-candidates-all-valid ()
   "All valid candidates are inserted."
@@ -212,16 +220,16 @@
         (c2 (make-builder-candidate :command "make test" :name "test"))
         (c3 (make-builder-candidate :command "make lint" :name "lint")))
     (builder--add-candidates tbl (list c1 c2 c3))
-    (should (= 3 (hash-table-count tbl)))
-    (should (gethash "build" tbl))
-    (should (gethash "test" tbl))
-    (should (gethash "lint" tbl))))
+    (should (= 3 (map-length tbl)))
+    (should (map-elt tbl "build"))
+    (should (map-elt tbl "test"))
+    (should (map-elt tbl "lint"))))
 
 (ert-deftest builder-test/add-candidates-empty-list ()
   "Empty input list leaves the table unchanged."
   (let ((tbl (make-hash-table :test #'equal)))
     (builder--add-candidates tbl nil)
-    (should (= 0 (hash-table-count tbl)))))
+    (should (= 0 (map-length tbl)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; builder--project-compilation-buffers
@@ -234,57 +242,61 @@
   "Default buffer name patterns are present in the returned table."
   (let* ((project "test-proj")
          (tbl (builder--project-compilation-buffers :project project))
-         (keys (hash-table-keys tbl)))
-    (should (cl-some (lambda (k) (string-match-p "test" k)) keys))
-    (should (cl-some (lambda (k) (string-match-p "build" k)) keys))))
+         (keys (map-keys tbl)))
+    (should (seq-some (lambda (k) (string-match-p "test" k)) keys))
+    (should (seq-some (lambda (k) (string-match-p "build" k)) keys))))
 
 (ert-deftest builder-test/project-compilation-buffers-includes-name ()
   "When :name is provided, a buffer with that name is included."
   (let* ((tbl (builder--project-compilation-buffers :name "mycmd" :project "p"))
-         (keys (hash-table-keys tbl)))
-    (should (cl-some (lambda (k) (string-match-p "mycmd" k)) keys))))
+         (keys (map-keys tbl)))
+    (should (seq-some (lambda (k) (string-match-p "mycmd" k)) keys))))
 
 (ert-deftest builder-test/project-compilation-buffers-annotations-are-strings ()
   "All annotations in the table are strings."
   (let ((tbl (builder--project-compilation-buffers :project "p")))
-    (maphash (lambda (_k v) (should (stringp v))) tbl)))
+    (map-do (lambda (_k v) (should (stringp v))) tbl)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; builder-register-candidates macro
 
 (ert-deftest builder-test/register-candidates-defines-function ()
   "The macro defines a function named `builder-candidates-for-<name>'."
-  (builder-register-candidates
-   :name "test-reg-simple"
-   :pipeline (list (make-builder-candidate :command "echo hi" :name "hi")))
-  (should (fboundp 'builder-candidates-for-test-reg-simple)))
+  (let ((builder-candidate-functions builder-candidate-functions))
+    (builder-register-candidates
+     :name "test-reg-simple"
+     :pipeline (list (make-builder-candidate :command "echo hi" :name "hi")))
+    (should (fboundp 'builder-candidates-for-test-reg-simple))))
 
 (ert-deftest builder-test/register-candidates-function-populates-table ()
   "The generated function adds candidates to the provided table."
-  (builder-register-candidates
-   :name "test-reg-pop"
-   :pipeline (list (make-builder-candidate :command "echo pop" :name "pop")))
-  (let ((tbl (make-hash-table :test #'equal)))
-    (builder-candidates-for-test-reg-pop "/" "proj" (list "/") tbl)
-    (should (gethash "pop" tbl))))
+  (let ((builder-candidate-functions builder-candidate-functions))
+    (builder-register-candidates
+     :name "test-reg-pop"
+     :pipeline (list (make-builder-candidate :command "echo pop" :name "pop")))
+    (let ((tbl (make-hash-table :test #'equal)))
+      (builder-candidates-for-test-reg-pop "/" "proj" (list "/") tbl)
+      (should (map-elt tbl "pop")))))
 
 (ert-deftest builder-test/register-candidates-returns-t ()
   "The generated function always returns t."
-  (builder-register-candidates
-   :name "test-reg-ret"
-   :pipeline nil)
-  (let ((tbl (make-hash-table :test #'equal)))
-    (should (eq t (builder-candidates-for-test-reg-ret "/" "proj" (list "/") tbl)))))
+  (let ((builder-candidate-functions builder-candidate-functions))
+    (builder-register-candidates
+     :name "test-reg-ret"
+     :pipeline nil)
+    (let ((tbl (make-hash-table :test #'equal)))
+      (should (eq t (builder-candidates-for-test-reg-ret "/" "proj" (list "/") tbl))))))
 
 (ert-deftest builder-test/register-candidates-with-false-predicate ()
   "When predicate is nil, no candidates are added to the table."
-  (builder-register-candidates
-   :name "test-reg-pred"
-   :predicate nil
-   :pipeline (list (make-builder-candidate :command "never" :name "never")))
-  (let ((tbl (make-hash-table :test #'equal)))
-    (builder-candidates-for-test-reg-pred "/" "proj" (list "/") tbl)
-    (should (= 0 (hash-table-count tbl)))))
+  (let ((builder-candidate-functions builder-candidate-functions))
+    (builder-register-candidates
+     :name "test-reg-pred"
+     :predicate nil
+     :pipeline (list (make-builder-candidate :command "never" :name "never")))
+    (let ((tbl (make-hash-table :test #'equal)))
+      (builder-candidates-for-test-reg-pred "/" "proj" (list "/") tbl)
+      (should (= 0 (map-length tbl))))))
 
 (ert-deftest builder-test/register-candidates-adds-to-global-hook-no-hooks ()
   "Without :hooks, the candidate function is added to `builder-candidate-functions'."
@@ -296,25 +308,27 @@
 
 (ert-deftest builder-test/register-candidates-with-hooks-defines-registrar ()
   "With :hooks, a registrar function named `builder-candidate-registrar-for-<name>' is defined."
-  (builder-register-candidates
-   :name "test-reg-hook"
-   :hooks '(some-hook)
-   :pipeline nil)
-  (should (fboundp 'builder-candidate-registrar-for-test-reg-hook)))
+  (let ((some-hook nil))
+    (builder-register-candidates
+     :name "test-reg-hook"
+     :hooks '(some-hook)
+     :pipeline nil)
+    (should (fboundp 'builder-candidate-registrar-for-test-reg-hook))))
 
 (ert-deftest builder-test/register-candidates-multiple-candidates ()
   "Multiple candidates from pipeline are all added."
-  (builder-register-candidates
-   :name "test-reg-multi"
-   :pipeline (list (make-builder-candidate :command "cmd1" :name "c1")
-                   (make-builder-candidate :command "cmd2" :name "c2")
-                   (make-builder-candidate :command "cmd3" :name "c3")))
-  (let ((tbl (make-hash-table :test #'equal)))
-    (builder-candidates-for-test-reg-multi "/" "proj" (list "/") tbl)
-    (should (= 3 (hash-table-count tbl)))
-    (should (gethash "c1" tbl))
-    (should (gethash "c2" tbl))
-    (should (gethash "c3" tbl))))
+  (let ((builder-candidate-functions builder-candidate-functions))
+    (builder-register-candidates
+     :name "test-reg-multi"
+     :pipeline (list (make-builder-candidate :command "cmd1" :name "c1")
+                     (make-builder-candidate :command "cmd2" :name "c2")
+                     (make-builder-candidate :command "cmd3" :name "c3")))
+    (let ((tbl (make-hash-table :test #'equal)))
+      (builder-candidates-for-test-reg-multi "/" "proj" (list "/") tbl)
+      (should (= 3 (map-length tbl)))
+      (should (map-elt tbl "c1"))
+      (should (map-elt tbl "c2"))
+      (should (map-elt tbl "c3")))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; builder-candidate :priority slot
@@ -336,7 +350,7 @@
   "Returns the candidate's priority when the name is in the table."
   (let ((tbl (make-hash-table :test #'equal))
         (c (make-builder-candidate :command "make" :name "build" :priority 1)))
-    (puthash "build" c tbl)
+    (setf (map-elt tbl "build") c)
     (should (= 1 (builder--candidate-priority tbl "build")))))
 
 (ert-deftest builder-test/candidate-priority-default-when-missing ()
@@ -354,9 +368,9 @@
   "Items present in history sort before items not in history."
   (let* ((annotated-completing-read-history (make-hash-table :test #'equal))
          (tbl (make-hash-table :test #'equal)))
-    (puthash "fresh" (make-builder-candidate :command "x" :name "fresh" :priority 2) tbl)
-    (puthash "prior" (make-builder-candidate :command "y" :name "prior" :priority 2) tbl)
-    (puthash 'h '("prior") annotated-completing-read-history)
+    (setf (map-elt tbl "fresh") (make-builder-candidate :command "x" :name "fresh" :priority 2))
+    (setf (map-elt tbl "prior") (make-builder-candidate :command "y" :name "prior" :priority 2))
+    (setf (map-elt annotated-completing-read-history 'h) '("prior"))
     (let ((sorted (funcall (builder--make-sort-fn tbl 'h) '("fresh" "prior"))))
       (should (equal "prior" (car sorted))))))
 
@@ -364,10 +378,10 @@
   "More recent history entries (lower index) sort before older ones."
   (let* ((annotated-completing-read-history (make-hash-table :test #'equal))
          (tbl (make-hash-table :test #'equal)))
-    (puthash "a" (make-builder-candidate :command "a" :name "a" :priority 2) tbl)
-    (puthash "b" (make-builder-candidate :command "b" :name "b" :priority 2) tbl)
+    (setf (map-elt tbl "a") (make-builder-candidate :command "a" :name "a" :priority 2))
+    (setf (map-elt tbl "b") (make-builder-candidate :command "b" :name "b" :priority 2))
     ;; history list: index 0 = most recent = "a", index 1 = "b"
-    (puthash 'h '("a" "b") annotated-completing-read-history)
+    (setf (map-elt annotated-completing-read-history 'h) '("a" "b"))
     (let ((sorted (funcall (builder--make-sort-fn tbl 'h) '("b" "a"))))
       (should (equal "a" (car sorted))))))
 
@@ -375,9 +389,9 @@
   "Lower priority number sorts first among items not in history."
   (let* ((annotated-completing-read-history (make-hash-table :test #'equal))
          (tbl (make-hash-table :test #'equal)))
-    (puthash "tier0" (make-builder-candidate :command "a" :name "tier0" :priority 0) tbl)
-    (puthash "tier2" (make-builder-candidate :command "b" :name "tier2" :priority 2) tbl)
-    (puthash "tier3" (make-builder-candidate :command "c" :name "tier3" :priority 3) tbl)
+    (setf (map-elt tbl "tier0") (make-builder-candidate :command "a" :name "tier0" :priority 0))
+    (setf (map-elt tbl "tier2") (make-builder-candidate :command "b" :name "tier2" :priority 2))
+    (setf (map-elt tbl "tier3") (make-builder-candidate :command "c" :name "tier3" :priority 3))
     (let ((sorted (funcall (builder--make-sort-fn tbl 'empty) '("tier3" "tier2" "tier0"))))
       (should (equal "tier0" (car sorted)))
       (should (equal "tier3" (car (last sorted)))))))
@@ -386,8 +400,8 @@
   "Among same-priority non-history items, shorter key sorts first."
   (let* ((annotated-completing-read-history (make-hash-table :test #'equal))
          (tbl (make-hash-table :test #'equal)))
-    (puthash "short" (make-builder-candidate :command "x" :name "short" :priority 2) tbl)
-    (puthash "longer-name" (make-builder-candidate :command "y" :name "longer-name" :priority 2) tbl)
+    (setf (map-elt tbl "short") (make-builder-candidate :command "x" :name "short" :priority 2))
+    (setf (map-elt tbl "longer-name") (make-builder-candidate :command "y" :name "longer-name" :priority 2))
     (let ((sorted (funcall (builder--make-sort-fn tbl 'empty) '("longer-name" "short"))))
       (should (equal "short" (car sorted))))))
 
@@ -396,8 +410,8 @@
   (let* ((annotated-completing-read-history (make-hash-table :test #'equal))
          (tbl (make-hash-table :test #'equal))
          (input (list "b" "a")))
-    (puthash "a" (make-builder-candidate :command "a" :name "a") tbl)
-    (puthash "b" (make-builder-candidate :command "b" :name "b") tbl)
+    (setf (map-elt tbl "a") (make-builder-candidate :command "a" :name "a"))
+    (setf (map-elt tbl "b") (make-builder-candidate :command "b" :name "b"))
     (funcall (builder--make-sort-fn tbl 'empty) input)
     (should (equal "b" (car input)))))
 
@@ -526,7 +540,7 @@
 the selected candidate (resolved via ACR's target support) and the table."
   (let* ((tbl (make-hash-table :test #'equal))
          (c (make-builder-candidate :command "make" :name "build")))
-    (puthash "build" c tbl)
+    (setf (map-elt tbl "build") c)
     (cl-letf (((symbol-function 'annotated-completing-read)
                (lambda (_tbl &rest _) c)))
       (let ((result (builder--read-command nil tbl)))
@@ -545,7 +559,7 @@ the selected candidate (resolved via ACR's target support) and the table."
         (should (consp result))
         (should (builder-candidate-p (car result)))
         (should (equal "custom-cmd" (builder-candidate-command (car result))))
-        (should (gethash "custom-cmd" (cdr result)))))))
+        (should (map-elt (cdr result) "custom-cmd"))))))
 
 (ert-deftest builder-test/read-command-unknown-long-selection-name-matches-key ()
   "Regression: for a typed command over 32 chars, the new candidate is stored
@@ -561,7 +575,7 @@ so callers no longer need to look it back up with `map-elt'."
              (candidate (car result))
              (candidates (cdr result))
              (name (builder-candidate-name candidate)))
-        (should (gethash name candidates))
+        (should (map-elt candidates name))
         (should (eq candidate (map-elt candidates name)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -782,9 +796,9 @@ or a resolved-but-unsuccessful result alike."
           (with-temp-file (expand-file-name "helper.el" temp-dir) (insert ";; not a test"))
           (let ((files (builder-elisp-package--test-files temp-dir)))
             (should (= (length files) 3))
-            (should (cl-some (lambda (f) (string-suffix-p "test-foo.el" f)) files))
-            (should (cl-some (lambda (f) (string-suffix-p "bar-test.el" f)) files))
-            (should (cl-some (lambda (f) (string-suffix-p "root-tests.el" f)) files))))
+            (should (seq-some (lambda (f) (string-suffix-p "test-foo.el" f)) files))
+            (should (seq-some (lambda (f) (string-suffix-p "bar-test.el" f)) files))
+            (should (seq-some (lambda (f) (string-suffix-p "root-tests.el" f)) files))))
       (delete-directory temp-dir t))))
 
 (ert-deftest builder-test/elisp-test-files-candidate-generator ()
@@ -798,7 +812,7 @@ or a resolved-but-unsuccessful result alike."
           (with-temp-buffer
             (emacs-lisp-mode)
             (builder-candidates-for-emacs-lisp-test-files temp-dir "demo" (list temp-dir) tbl))
-          (should (cl-some (lambda (k) (string-match-p "ert-test-file.*test-demo\\.el" k)) (hash-table-keys tbl))))
+          (should (seq-some (lambda (k) (string-match-p "ert-test-file.*test-demo\\.el" k)) (map-keys tbl))))
       (delete-directory temp-dir t))))
 
 (ert-deftest builder-test/elisp-project-test-runner-candidate-generator ()
@@ -812,7 +826,7 @@ or a resolved-but-unsuccessful result alike."
           (with-temp-buffer
             (emacs-lisp-mode)
             (builder-candidates-for-emacs-lisp-project-test temp-dir "demo" (list temp-dir) tbl))
-          (should (cl-some (lambda (k) (string-match-p "test-project-ert-all" k)) (hash-table-keys tbl))))
+          (should (seq-some (lambda (k) (string-match-p "test-project-ert-all" k)) (map-keys tbl))))
       (delete-directory temp-dir t))))
 
 (ert-deftest builder-test/ert-results-update-stats-display-advice ()
@@ -966,9 +980,9 @@ or a resolved-but-unsuccessful result alike."
   "Test candidate generator `builder-candidates-for-emacs-conf-ci-tasks` produces CI targets."
   (let ((tbl (make-hash-table :test #'equal)))
     (builder-candidates-for-emacs-conf-ci-tasks user-emacs-directory "dot-emacs" (list user-emacs-directory) tbl)
-    (should (gethash "ci-run-tests" tbl))
-    (should (gethash "ci-clean-elc" tbl))
-    (should (gethash "ci-docker-tests" tbl))))
+    (should (map-elt tbl "ci-run-tests"))
+    (should (map-elt tbl "ci-clean-elc"))
+    (should (map-elt tbl "ci-docker-tests"))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1021,7 +1035,8 @@ or a resolved-but-unsuccessful result alike."
           (let ((content2 (with-temp-buffer
                             (insert-file-contents exclude-file)
                             (buffer-string))))
-            (should (= 1 (cl-count "coverage/" (split-string content2 "\n" t) :test #'string-match-p)))))
+            (should (= 1 (seq-count (lambda (line) (string-match-p "coverage/" line))
+                                    (split-string content2 "\n" t))))))
       (delete-directory temp-dir t))))
 
 (ert-deftest builder-test/go-coverage-error-outside-project ()
@@ -1107,18 +1122,18 @@ or a resolved-but-unsuccessful result alike."
 
 (ert-deftest builder-test/mode-managed-settings ()
   "Enabling and disabling `builder-mode' applies and reverts managed settings."
-  (let ((was-on (bound-and-true-p builder-mode))
-        (compilation-scroll-output nil)
-        (compilation-max-output-line-length 500))
+  (let ((was-on (bound-and-true-p builder-mode)))
     (unwind-protect
         (progn
           (when was-on (builder-mode -1))
-          (builder-mode 1)
-          (should (eq compilation-scroll-output t))
-          (should (null compilation-max-output-line-length))
-          (builder-mode -1)
-          (should (null compilation-scroll-output))
-          (should (eq compilation-max-output-line-length 500)))
+          (let ((compilation-scroll-output nil)
+                (compilation-max-output-line-length 500))
+            (builder-mode 1)
+            (should (eq compilation-scroll-output t))
+            (should (null compilation-max-output-line-length))
+            (builder-mode -1)
+            (should (null compilation-scroll-output))
+            (should (eq compilation-max-output-line-length 500))))
       (if was-on
           (builder-mode 1)
         (when (bound-and-true-p builder-mode)
@@ -1162,7 +1177,10 @@ or a resolved-but-unsuccessful result alike."
             (should (equal byte-compile-warnings builder-elisp-byte-compile-warnings)))
           (builder-mode -1)
           (should-not (memq #'builder-elisp-mode emacs-lisp-mode-hook))
-          (should-not (advice-member-p #'builder--ert-no-focus-advice 'ert-run-tests-interactively)))
+          (unless (seq-some (lambda (buf)
+                              (buffer-local-value 'builder-elisp-mode buf))
+                            (buffer-list))
+            (should-not (advice-member-p #'builder--ert-no-focus-advice 'ert-run-tests-interactively))))
       (setq emacs-lisp-mode-hook orig-hook)
       (if was-on
           (builder-mode 1)
@@ -1282,6 +1300,172 @@ or a resolved-but-unsuccessful result alike."
       (ignore-errors (delete-file tmp-balanced))
       (ignore-errors (delete-file tmp-unbalanced))
       (ignore-errors (delete-file tmp-load)))))
+
+(ert-deftest builder-test/vale-insert-statistics-key-argument ()
+  "Verify `builder--vale-insert-statistics' accepts `:filename' via `cl-defun'."
+  (with-temp-buffer
+    (let ((buf (current-buffer)))
+      (cl-letf (((symbol-function 'shell-command-to-string)
+                 (lambda (cmd)
+                   (should (string-match-p "test-doc\\.org" cmd))
+                   "{\"words\": 42, \"paragraphs\": 3}")))
+        (builder--vale-insert-statistics buf "finished" :filename "/tmp/test-doc.org")
+        (should (string-match-p "statistics for /tmp/test-doc\\.org" (buffer-string)))
+        (should (string-match-p "words:42" (buffer-string)))))))
+
+(ert-deftest builder-test/compile-project-end-to-end ()
+  "Test `builder-compile-project' end-to-end with mocked completion and compilation-start."
+  (let* ((cand (make-builder-candidate :command "echo hello" :name "echo" :directory "/tmp/"))
+         (comp-buf (generate-new-buffer " *test-comp-buf*"))
+         started-cmd
+         started-dir)
+    (unwind-protect
+        (cl-letf (((symbol-function 'approximate-project-root) (lambda () "/tmp/"))
+                  ((symbol-function 'builder--read-command)
+                   (lambda (&rest _) (cons cand (make-hash-table :test #'equal))))
+                  ((symbol-function 'read-from-minibuffer)
+                   (lambda (_prompt initial &rest _) initial))
+                  ((symbol-function 'builder--buffer-for-command) (lambda (_) nil))
+                  ((symbol-function 'builder--project-compilation-buffers)
+                   (lambda (&rest _) (make-hash-table :test #'equal)))
+                  ((symbol-function 'annotated-completing-read)
+                   (lambda (_tbl &rest _) (buffer-name comp-buf)))
+                  ((symbol-function 'save-some-buffers) (lambda (&rest _) nil))
+                  ((symbol-function 'compilation-start)
+                   (lambda (cmd _mode _name-fn)
+                     (setq started-cmd cmd
+                           started-dir default-directory)
+                     comp-buf))
+                  ((symbol-function 'switch-to-buffer-other-window) #'ignore))
+          (builder-compile-project)
+          (should (equal started-cmd "echo hello"))
+          (should (equal started-dir "/tmp/")))
+      (when (buffer-live-p comp-buf)
+        (kill-buffer comp-buf)))))
+
+(ert-deftest builder-test/python-and-cask-candidate-generators ()
+  "Test language-specific candidate generators beyond elisp-test-files."
+  (let ((temp-dir (make-temp-file "builder-lang-gen-" t))
+        (tbl (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "pyproject.toml" temp-dir) (insert "[project]\nname = \"demo\"\n"))
+          (with-temp-file (expand-file-name "Cask" temp-dir) (insert "(source gnu)\n"))
+          (builder-candidates-for-py-projects temp-dir "demo" (list temp-dir) tbl)
+          (builder-candidates-for-emacs-lisp-cask temp-dir "demo" (list temp-dir) tbl)
+          (should (map-elt tbl "ruff check"))
+          (should (map-elt tbl "ruff format"))
+          (should (map-elt tbl "cask-test <demo>"))
+          (should (map-elt tbl "cask-build <demo>")))
+      (delete-directory temp-dir t))))
+
+(ert-deftest builder-test/elisp-package-compile-and-clean ()
+  "Test `builder-elisp-package-compile' and `builder-elisp-package-clean'."
+  (let* ((temp-dir (file-name-as-directory (make-temp-file "builder-pkg-ops-" t)))
+         (pkg-name (file-name-nondirectory (directory-file-name temp-dir)))
+         (main-file (expand-file-name (concat pkg-name ".el") temp-dir))
+         (elc-file (concat (file-name-sans-extension main-file) ".elc"))
+         (build-dir (expand-file-name "build" temp-dir))
+         (noninteractive nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'approximate-project-root) (lambda () temp-dir)))
+          (with-temp-file main-file
+            (insert ";;; -*- lexical-binding: t; -*-\n"
+                    "(defun builder-test-pkg-op-fn (x) (1+ x))\n"
+                    (format "(provide '%s)\n" pkg-name)))
+          (make-directory build-dir t)
+          (should (builder-elisp-package-compile))
+          (should (file-exists-p elc-file))
+          (builder-elisp-package-clean)
+          (should-not (file-exists-p elc-file))
+          (should-not (file-directory-p build-dir)))
+      (delete-directory temp-dir t))))
+
+(ert-deftest builder-test/elisp-package-lint-and-build ()
+  "Test `builder-elisp-package-lint' and `builder-elisp-package-build' with mocked external tools."
+  (require 'checkdoc)
+  (require 'package-lint nil t)
+  (require 'package-build nil t)
+  (require 'package-recipe nil t)
+  (let* ((temp-dir (file-name-as-directory (make-temp-file "builder-pkg-lb-" t)))
+         (pkg-name (file-name-nondirectory (directory-file-name temp-dir)))
+         (main-file (expand-file-name (concat pkg-name ".el") temp-dir))
+         (noninteractive nil)
+         built-archive)
+    (unwind-protect
+        (cl-letf (((symbol-function 'approximate-project-root) (lambda () temp-dir))
+                  ((symbol-function 'checkdoc-current-buffer) #'ignore)
+                  ((symbol-function 'package-lint-buffer) (lambda () nil))
+                  ((symbol-function 'call-process) (lambda (&rest _) 0))
+                  ((symbol-function 'package-build-archive)
+                   (lambda (name) (setq built-archive name))))
+          (with-temp-file main-file
+            (insert ";;; -*- lexical-binding: t; -*-\n"
+                    "(defun builder-test-pkg-lb-fn (x) (1+ x))\n"
+                    (format "(provide '%s)\n" pkg-name)))
+          (make-directory (expand-file-name ".git" temp-dir) t)
+          (let ((features (cons 'package-lint (cons 'package-build (cons 'package-recipe features)))))
+            (should (builder-elisp-package-lint))
+            (when-let* ((buf (find-buffer-visiting main-file)))
+              (kill-buffer buf))
+            (builder-elisp-package-build)
+            (should (equal built-archive pkg-name))
+            (should (file-exists-p (expand-file-name (concat "build/recipes/" pkg-name) temp-dir)))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest builder-test/package-deps-closure-and-unused ()
+  "Test `builder-package-deps-map', `builder-package-deps-closure', and `builder-package-unused'."
+  (let* ((temp-elpa (make-temp-file "builder-elpa-" t))
+         (package-user-dir temp-elpa)
+         (package-alist
+          (list (list 'pkg-a (package-desc-create :name 'pkg-a :version '(1 0) :reqs '((pkg-b (1 0)) (emacs (29 1)))))
+                (list 'pkg-b (package-desc-create :name 'pkg-b :version '(1 0) :reqs nil)))))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "pkg-a-1.0" temp-elpa) t)
+          (make-directory (expand-file-name "pkg-b-1.0" temp-elpa) t)
+          (make-directory (expand-file-name "pkg-orphan-0.5" temp-elpa) t)
+          (make-directory (expand-file-name "archives" temp-elpa) t)
+          (let ((deps-map (builder-package-deps-map '(pkg-a pkg-b))))
+            (should (equal (map-elt deps-map 'pkg-a) '(pkg-b)))
+            (should (null (map-elt deps-map 'pkg-b))))
+          (let ((closure (builder-package-deps-closure '(pkg-a local-pkg))))
+            (should (memq 'pkg-a closure))
+            (should (memq 'pkg-b closure))
+            (should (memq 'local-pkg closure)))
+          (cl-letf (((symbol-function 'builder-package--declared-use-packages) (lambda (&optional _) nil)))
+            (should (equal (builder-package-unused '(pkg-a)) '(pkg-orphan)))))
+      (delete-directory temp-elpa t))))
+
+(ert-deftest builder-test/native-compile-queue-and-byte-recompile ()
+  "Test `builder--native-compile-process-queue' and `builder-emacs-conf-byte-recompile-directory'."
+  (let* ((builder--native-compile-queue (list "/tmp/a.el" "/tmp/b.el"))
+         (builder--native-compile-chunk-size 1)
+         (builder--native-compile-idle-timer nil)
+         compiled-chunks)
+    (cl-letf (((symbol-function 'builder--native-compile-stale-p) (lambda (_) t))
+              ((symbol-function 'native-compile-async)
+               (lambda (files) (push files compiled-chunks))))
+      (builder--native-compile-process-queue)
+      (should (= (length builder--native-compile-queue) 1))
+      (should (= (length compiled-chunks) 1))
+      (builder--native-compile-process-queue)
+      (should (null builder--native-compile-queue))))
+  (let* ((temp-emacs (file-name-as-directory (make-temp-file "builder-recompile-" t)))
+         (user-emacs-directory temp-emacs)
+         (sub-dir (expand-file-name "lisp" temp-emacs))
+         (el-file (expand-file-name "sample.el" sub-dir))
+         recompiled)
+    (unwind-protect
+        (progn
+          (make-directory sub-dir t)
+          (with-temp-file el-file (insert ";; sample\n"))
+          (cl-letf (((symbol-function 'byte-recompile-file)
+                     (lambda (f _force) (push f recompiled) t)))
+            (let ((res (builder-emacs-conf-byte-recompile-directory)))
+              (should (member el-file res))
+              (should (member el-file recompiled)))))
+      (delete-directory temp-emacs t))))
 
 (provide 'test-builder)
 ;;; test-builder.el ends here
