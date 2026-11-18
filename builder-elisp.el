@@ -165,16 +165,29 @@ returning a deduplicated list of existing directories or files."
 Resolves candidate paths via `builder-elisp-package-path-resolvers'."
   (let* ((name (builder-elisp-package--name root))
          (target (concat name ".el")))
-    (cl-some (lambda (path)
-               (cond
-                ((file-regular-p path)
-                 (when (string-equal (file-name-nondirectory path) target)
-                   path))
-                ((file-directory-p path)
-                 (let ((candidate (f-join path target)))
-                   (when (file-regular-p candidate)
-                     candidate)))))
-             (builder-elisp-package-resolve-paths root name))))
+    (seq-some (lambda (path)
+                (cond
+                 ((file-regular-p path)
+                  (when (string-equal (file-name-nondirectory path) target)
+                    path))
+                 ((file-directory-p path)
+                  (let ((candidate (f-join path target)))
+                    (when (file-regular-p candidate)
+                      candidate)))))
+              (builder-elisp-package-resolve-paths root name))))
+
+(defun builder-elisp-package--resolve (&optional root require-main)
+  "Resolve package metadata for ROOT (defaults to `approximate-project-root').
+Returns a list (ROOT NAME MAIN-FILE).
+When REQUIRE-MAIN is non-nil and MAIN-FILE is nil, signals an error
+\(`error' if REQUIRE-MAIN is `error', `user-error' otherwise)."
+  (let* ((resolved-root (file-name-as-directory (or root (approximate-project-root))))
+         (name (builder-elisp-package--name resolved-root))
+         (main-file (builder-elisp-package--main-file resolved-root)))
+    (when (and require-main (not main-file))
+      (funcall (if (eq require-main 'error) #'error #'user-error)
+               "no <%s>.el at %s" name resolved-root))
+    (list resolved-root name main-file)))
 
 (defun builder-elisp-package-p (&optional root)
   "Return non-nil if ROOT looks like an elisp package.
@@ -186,16 +199,16 @@ ROOT defaults to `approximate-project-root'."
 Resolves candidate paths via `builder-elisp-package-path-resolvers'."
   (let* ((name (builder-elisp-package--name root))
          (target (concat name "-pkg.el")))
-    (cl-some (lambda (path)
-               (cond
-                ((file-regular-p path)
-                 (when (string-equal (file-name-nondirectory path) target)
-                   path))
-                ((file-directory-p path)
-                 (let ((candidate (f-join path target)))
-                   (when (file-regular-p candidate)
-                     candidate)))))
-             (builder-elisp-package-resolve-paths root name))))
+    (seq-some (lambda (path)
+                (cond
+                 ((file-regular-p path)
+                  (when (string-equal (file-name-nondirectory path) target)
+                    path))
+                 ((file-directory-p path)
+                  (let ((candidate (f-join path target)))
+                    (when (file-regular-p candidate)
+                      candidate)))))
+              (builder-elisp-package-resolve-paths root name))))
 
 (defun builder-elisp-package--source-files (root)
   "Return the list of top-level .el source files under ROOT.
@@ -220,18 +233,21 @@ byte-compiled as ordinary sources."
   (let ((dirs (seq-filter #'file-directory-p
                           (list (f-join root "test")
                                 (f-join root "tests")
-                                root)))
-        (files nil))
-    (dolist (dir dirs)
-      (dolist (it (f-entries dir #'file-regular-p))
-        (when (string-equal (file-name-extension it) "el")
-          (let ((name (file-name-nondirectory it)))
-            (when (or (string-prefix-p "test-" name)
-                      (string-suffix-p "-test.el" name)
-                      (string-suffix-p "-tests.el" name)
-                      (not (f-equal-p dir root)))
-              (push it files))))))
-    (seq-uniq (nreverse files))))
+                                root))))
+    (thread-last dirs
+                 (seq-mapcat
+                  (lambda (dir)
+                    (seq-filter
+                     (lambda (it)
+                       (and (string-equal (file-name-extension it) "el")
+                            (let ((name (file-name-nondirectory it)))
+                              (or (string-prefix-p "test-" name)
+                                  (string-suffix-p "-test.el" name)
+                                  (string-suffix-p "-tests.el" name)
+                                  (not (f-equal-p dir root))))))
+                     (f-entries dir #'file-regular-p))))
+                 seq-uniq)))
+
 (defun builder-elisp-package--read-pkg-deps (pkg-file)
   "Return dep symbols from a multi-file package's <NAME>-pkg.el descriptor.
 Reads the `define-package' form's fourth argument (the requires list).
@@ -245,7 +261,7 @@ The pseudo-package `emacs' is omitted."
           (when (and (consp reqs) (eq (car reqs) 'quote))
             (setq reqs (cadr reqs)))
           (seq-remove (lambda (it) (eq it 'emacs))
-			  (seq-map #'car reqs)))))))
+                      (seq-map #'car reqs)))))))
 
 (defun builder-elisp-package--read-deps (file-or-root)
   "Return list of dep package symbols for the package at FILE-OR-ROOT.
@@ -265,15 +281,16 @@ package `emacs' is omitted, since it is not installable."
       (insert-file-contents file-or-root)
       (when-let* ((line (lm-header "Package-Requires")))
         (seq-remove (lambda (it) (eq it 'emacs))
-			(seq-map #'car (read line))))))))
+                    (seq-map #'car (read line))))))))
 
 (defun builder-elisp-package--require-deps (deps)
   "Require each symbol in DEPS, signaling a `user-error' if any cannot load.
 Use this from contexts that assume the user's `load-path' already provides them
 \(direct M-x invocation, or batch with `-L' flags pointing into ~/.emacs.d/elpa)."
-  (dolist (it deps)
-    (unless (require it nil t)
-      (user-error "elisp-package dependency not on load-path: %s" it))))
+  (seq-do (lambda (it)
+            (unless (require it nil t)
+              (user-error "elisp-package dependency not on load-path: %s" it)))
+          deps))
 
 ;;;###autoload
 (defun builder-elisp-package-test ()
@@ -283,9 +300,8 @@ then runs ert. In batch mode exits with the test status; otherwise
 opens the *ert* selector."
   (interactive)
   (require 'ert)
-  (let* ((root (file-name-as-directory (approximate-project-root)))
-         (main-file (builder-elisp-package--main-file root))
-         (test-files (builder-elisp-package--test-files root)))
+  (pcase-let* ((`(,root ,_name ,main-file) (builder-elisp-package--resolve))
+               (test-files (builder-elisp-package--test-files root)))
     (unless (or main-file test-files)
       (user-error "No test files or package found at %s" root))
     (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
@@ -294,11 +310,11 @@ opens the *ert* selector."
            (load-path (append (cons root test-dirs) load-path)))
       (when main-file
         (load main-file nil t)
-        (dolist (it (builder-elisp-package--source-files root))
-          (unless (f-equal-p it main-file)
-            (load it nil t))))
-      (dolist (it test-files)
-        (load it nil t)))
+        (seq-do (lambda (it)
+                  (unless (f-equal-p it main-file)
+                    (load it nil t)))
+                (builder-elisp-package--source-files root)))
+      (seq-do (lambda (it) (load it nil t)) test-files))
     (if noninteractive
         (ert-run-tests-batch-and-exit)
       (ert t))))
@@ -427,17 +443,15 @@ ORIG-FN and ARGS identify the original ERT invocation."
   "Byte-compile every top-level .el source file in the elisp package at point.
 In batch mode exits with status 1 if any file fails to compile."
   (interactive)
-  (let* ((root      (file-name-as-directory (approximate-project-root)))
-         (main-file (builder-elisp-package--main-file root)))
-    (unless main-file
-      (user-error "no <%s>.el at %s" (builder-elisp-package--name root) root))
+  (pcase-let ((`(,root ,_name ,_main-file) (builder-elisp-package--resolve nil t)))
     (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
     (let* ((load-path (cons root load-path))
            (byte-compile-warnings builder-elisp-byte-compile-warnings)
            (failed 0))
-      (dolist (it (builder-elisp-package--source-files root))
-        (unless (byte-compile-file it)
-          (cl-incf failed)))
+      (seq-do (lambda (it)
+                (unless (byte-compile-file it)
+                  (cl-incf failed)))
+              (builder-elisp-package--source-files root))
       (when noninteractive
         (kill-emacs (if (zerop failed) 0 1)))
       (zerop failed))))
@@ -447,12 +461,9 @@ In batch mode exits with status 1 if any file fails to compile."
   "Run linters (byte-compile, checkdoc, package-lint) for the package at point.
 In batch mode exits with status 1 if any file fails linting or compilation."
   (interactive)
-  (let* ((root      (file-name-as-directory (approximate-project-root)))
-         (main-file (builder-elisp-package--main-file root))
-         (sources   (builder-elisp-package--source-files root))
-         (failed 0))
-    (unless main-file
-      (user-error "no <%s>.el at %s" (builder-elisp-package--name root) root))
+  (pcase-let* ((`(,root ,_name ,_main-file) (builder-elisp-package--resolve nil t))
+               (sources (builder-elisp-package--source-files root))
+               (failed 0))
     (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
     (let* ((load-path (cons root load-path))
            (byte-compile-warnings builder-elisp-byte-compile-warnings)
@@ -460,32 +471,36 @@ In batch mode exits with status 1 if any file fails linting or compilation."
            (checkdoc-spellcheck-documentation-flag builder-elisp-checkdoc-spellcheck-documentation-flag)
            (byte-compile-error-on-warn t))
       ;; 1. Byte-compilation
-      (dolist (it sources)
-        (message "[builder-lint] byte-compiling %s..." (file-name-nondirectory it))
-        (unless (byte-compile-file it)
-          (cl-incf failed))
-        (let ((elc (concat (file-name-sans-extension it) ".elc")))
-          (when (file-exists-p elc)
-            (delete-file elc))))
+      (seq-do (lambda (it)
+                (message "[builder-lint] byte-compiling %s..." (file-name-nondirectory it))
+                (unless (byte-compile-file it)
+                  (cl-incf failed))
+                (let ((elc (concat (file-name-sans-extension it) ".elc")))
+                  (when (file-exists-p elc)
+                    (delete-file elc))))
+              sources)
       ;; 2. Checkdoc
       (require 'checkdoc)
-      (dolist (it sources)
-        (message "[builder-lint] checkdoc %s..." (file-name-nondirectory it))
-        (with-current-buffer (find-file-noselect it)
-          (let ((checkdoc-diagnostic-buffer "*checkdoc-diagnostics*"))
-            (checkdoc-current-buffer t))))
+      (seq-do (lambda (it)
+                (message "[builder-lint] checkdoc %s..." (file-name-nondirectory it))
+                (with-current-buffer (find-file-noselect it)
+                  (let ((checkdoc-diagnostic-buffer "*checkdoc-diagnostics*"))
+                    (checkdoc-current-buffer t))))
+              sources)
       ;; 3. Package-lint (when available)
       (when (require 'package-lint nil t)
-        (dolist (it sources)
-          (message "[builder-lint] package-lint %s..." (file-name-nondirectory it))
-          (with-current-buffer (find-file-noselect it)
-            (let ((errs (package-lint-buffer)))
-              (when errs
-                (dolist (e errs)
-                  (message "[builder-lint] %s:%s:%s [%s]: %s"
-                           (file-name-nondirectory it)
-                           (nth 0 e) (nth 1 e) (nth 2 e) (nth 3 e)))
-                (cl-incf failed (length (seq-filter (lambda (e) (eq (nth 2 e) 'error)) errs))))))))
+        (seq-do (lambda (it)
+                  (message "[builder-lint] package-lint %s..." (file-name-nondirectory it))
+                  (with-current-buffer (find-file-noselect it)
+                    (let ((errs (package-lint-buffer)))
+                      (when errs
+                        (seq-do (lambda (e)
+                                  (message "[builder-lint] %s:%s:%s [%s]: %s"
+                                           (file-name-nondirectory it)
+                                           (nth 0 e) (nth 1 e) (nth 2 e) (nth 3 e)))
+                                errs)
+                        (cl-incf failed (length (seq-filter (lambda (e) (eq (nth 2 e) 'error)) errs)))))))
+                sources))
       (message "[builder-lint] completed with %d error(s)" failed)
       (when noninteractive
         (kill-emacs (if (zerop failed) 0 1)))
@@ -500,23 +515,19 @@ are not included. The tarball lands in <root>/build/packages/."
   (interactive)
   (require 'package-build)
   (require 'package-recipe)
-  (let* ((root      (file-name-as-directory (approximate-project-root)))
-         (name      (builder-elisp-package--name root))
-         (main-file (builder-elisp-package--main-file root)))
-    (unless main-file
-      (user-error "no <%s>.el at %s" name root))
+  (pcase-let ((`(,root ,name ,_main-file) (builder-elisp-package--resolve nil t)))
     (unless (file-directory-p (f-join root ".git"))
       (user-error "package build requires a git repository at %s" root))
     (unless (zerop (call-process "git" nil nil nil "-C" root
                                  "rev-parse" "--verify" "HEAD"))
       (user-error "package build requires at least one commit in %s" root))
-    (let* ((build-root  (f-join root "build"))
+    (let* ((build-root (f-join root "build"))
            (working-dir (f-join build-root "working"))
            (archive-dir (f-join build-root "packages"))
            (recipes-dir (f-join build-root "recipes"))
            (recipe-path (f-join recipes-dir name)))
-      (dolist (it (list build-root working-dir archive-dir recipes-dir))
-        (make-directory it t))
+      (seq-do (lambda (it) (make-directory it t))
+              (list build-root working-dir archive-dir recipes-dir))
       (with-temp-file recipe-path
         (let ((print-quoted t))
           (prin1 `(,(intern name)
@@ -538,14 +549,16 @@ are not included. The tarball lands in <root>/build/packages/."
   "Remove build artifacts (build/, .cache/, *.elc) for the elisp package at point."
   (interactive)
   (let ((root (file-name-as-directory (approximate-project-root))))
-    (dolist (it (list (f-join root "build") (f-join root ".cache")))
-      (when (file-directory-p it)
-        (delete-directory it t)
-        (message "removed %s" it)))
-    (dolist (it (seq-filter (lambda (it) (string-equal (file-name-extension it) "elc"))
-			  (f-entries root #'file-regular-p t)))
-      (delete-file it)
-      (message "removed %s" it))
+    (seq-do (lambda (it)
+              (when (file-directory-p it)
+                (delete-directory it t)
+                (message "removed %s" it)))
+            (list (f-join root "build") (f-join root ".cache")))
+    (seq-do (lambda (it)
+              (delete-file it)
+              (message "removed %s" it))
+            (seq-filter (lambda (it) (string-equal (file-name-extension it) "elc"))
+                        (f-entries root #'file-regular-p t)))
     (when noninteractive (kill-emacs 0))))
 
 ;;;###autoload
@@ -559,11 +572,10 @@ the package feature."
    (list (if current-prefix-arg
              (read-directory-name "Reload package in directory: ")
            (or (approximate-project-root) default-directory))))
-  (let* ((root (file-name-as-directory (expand-file-name (or directory (approximate-project-root) default-directory))))
-         (name (builder-elisp-package--name root))
-         (main-file (builder-elisp-package--main-file root))
-         (source-files (builder-elisp-package--source-files root))
-         (dirs (builder-elisp-package-directories root name)))
+  (pcase-let* ((target-dir (expand-file-name (or directory (approximate-project-root) default-directory)))
+               (`(,root ,name ,main-file) (builder-elisp-package--resolve target-dir))
+               (source-files (builder-elisp-package--source-files root))
+               (dirs (builder-elisp-package-directories root name)))
     (unless (file-directory-p root)
       (user-error "Directory does not exist: %s" root))
     (unless (or main-file source-files)
@@ -573,8 +585,9 @@ the package feature."
                                        (f-entries scripts-dir #'file-regular-p)))))
     (unless (or main-file source-files)
       (user-error "No Emacs Lisp package or source files found in %s" root))
-    (dolist (d (or dirs (list root)))
-      (add-to-list 'load-path (file-name-as-directory d)))
+    (seq-do (lambda (d)
+              (add-to-list 'load-path (file-name-as-directory d)))
+            (or dirs (list root)))
     (when-let* ((deps (builder-elisp-package--read-deps root)))
       (builder-elisp-package--require-deps deps))
     (let* ((files (seq-uniq
@@ -583,13 +596,15 @@ the package feature."
                      source-files)))
            (load-prefer-newer t)
            (count 0))
-      (dolist (file files)
-        (load (file-name-sans-extension file) nil t)
-        (cl-incf count))
-      (dolist (al (list (f-join root (concat name "-autoloads.el"))
-                        (f-join root "loaddefs.el")))
-        (when (file-regular-p al)
-          (load (file-name-sans-extension al) nil t)))
+      (seq-do (lambda (file)
+                (load (file-name-sans-extension file) nil t)
+                (cl-incf count))
+              files)
+      (seq-do (lambda (al)
+                (when (file-regular-p al)
+                  (load (file-name-sans-extension al) nil t)))
+              (list (f-join root (concat name "-autoloads.el"))
+                    (f-join root "loaddefs.el")))
       (when name
         (provide (intern name)))
       (when (fboundp 'builder-clear-all-caches)
@@ -611,31 +626,43 @@ Reads `Package-Requires' via `package-desc-reqs' on the entry in
 when PACKAGE is not installed."
   (when-let* ((desc (cadr (assq package package-alist))))
     (seq-remove (lambda (it) (eq it 'emacs))
-		 (seq-map #'car (package-desc-reqs desc)))))
+                (seq-map #'car (package-desc-reqs desc)))))
 
 (defun builder-package-deps-map (packages)
   "Return a hash-table mapping each symbol in PACKAGES to its direct deps.
 Values are lists of dependency symbols read from local package
 metadata.  Packages not present in `package-alist' map to nil."
   (let ((table (make-hash-table :test 'eq)))
-    (dolist (pkg packages table)
-      (puthash pkg (builder-package--direct-deps pkg) table))))
+    (seq-do (lambda (pkg)
+              (setf (map-elt table pkg) (builder-package--direct-deps pkg)))
+            packages)
+    table))
 
 (defun builder-package-deps-closure (packages)
   "Return the de-duplicated transitive closure of PACKAGES.
 Includes the roots themselves even when they have no entry in
 `package-alist' (e.g. packages loaded via `:load-path').
-`package--get-deps' filters such roots out of its result because it
-keys off `package-alist'; we union the raw roots back in so closure
-membership is meaningful for non-package.el installs."
-  (seq-uniq (append (copy-sequence packages)
-                    (package--get-deps (copy-sequence packages)))))
+Walks `builder-package--direct-deps' transitively from PACKAGES so this
+works across Emacs 29 and 30+ (where `package--get-deps' was removed)."
+  (let ((seen nil)
+        (to-visit (copy-sequence packages)))
+    (while to-visit
+      (let ((pkg (pop to-visit)))
+        (unless (memq pkg seen)
+          (push pkg seen)
+          (seq-do (lambda (dep)
+                    (unless (memq dep seen)
+                      (push dep to-visit)))
+                  (builder-package--direct-deps pkg)))))
+    (nreverse seen)))
 
-(defvar builder-package-installed-exclude '(archives gnupg)
+(defcustom builder-package-installed-exclude '(archives gnupg)
   "Directory-name symbols under `package-user-dir' to ignore.
 These are subdirectories created by `package.el' that are not
 packages (archive metadata, gpg keyring).  Consumed by
-`builder-package--installed-on-disk'.")
+`builder-package--installed-on-disk'."
+  :type '(repeat symbol)
+  :group 'builder-elisp)
 
 (defun builder-package--installed-on-disk ()
   "Return package-name symbols rooted in `package-user-dir'.
@@ -671,16 +698,17 @@ are not misclassified as unused."
                ((memq (car form) '(progn prog1 prog2 eval-and-compile
                                         eval-when-compile with-eval-after-load
                                         when unless if))
-                (dolist (sub (cdr form)) (funcall walk sub)))))))
+                (seq-do walk (cdr form)))))))
     (when (file-directory-p dir)
-      (dolist (file (directory-files-recursively dir "\\.el\\'"))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (goto-char (point-min))
-          (condition-case nil
-              (while t (funcall walk (read (current-buffer))))
-            (end-of-file nil)
-            (invalid-read-syntax nil)))))
+      (seq-do (lambda (file)
+                (with-temp-buffer
+                  (insert-file-contents file)
+                  (goto-char (point-min))
+                  (condition-case nil
+                      (while t (funcall walk (read (current-buffer))))
+                    (end-of-file nil)
+                    (invalid-read-syntax nil))))
+              (directory-files-recursively dir "\\.el\\'")))
     (seq-uniq declared)))
 
 ;;;###autoload
