@@ -1276,7 +1276,13 @@ or a resolved-but-unsuccessful result alike."
             (should (equal (plist-get res :status) "ok"))
             (should (plist-get res :loaded))
             (should (boundp 'test-loadable-var))
-            (should (= (symbol-value 'test-loadable-var) 12345))))
+            (should (= (symbol-value 'test-loadable-var) 12345)))
+
+          ;; 4. Run tests with selector
+          (let ((res (builder-mcp-call-tool 'builder_run_tests (list :selector "^builder-test/mcp-read-buffer-missing$"))))
+            (should (equal (plist-get res :status) "ok"))
+            (should (>= (plist-get res :total) 1))
+            (should (>= (plist-get res :passed) 1))))
       (delete-file tmp))))
 
 (provide 'test-builder)
