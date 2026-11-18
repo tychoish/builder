@@ -26,6 +26,7 @@
 (require 'cl-lib)
 (require 'mcpkit)
 (require 'builder-core)
+(require 'builder-isolate-elisp)
 
 (defgroup builder-mcp nil
   "Model Context Protocol service for builder."
@@ -188,6 +189,135 @@
                         buffers))))
             (buffer-list))
     (nreverse buffers)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Tool 6: builder_byte_compile / byte_compile
+
+(mcpkit-register-tool 'builder_byte_compile 'builder
+  :description "Byte-compile an Elisp file in an isolated subprocess and delete the artifact (.elc)."
+  :input-schema '(:type "object"
+                  :properties (:file (:type "string" :description "Path to Elisp file (relative to Emacs dir or absolute)"))
+                  :required ["file"])
+  (let* ((file (plist-get args :file))
+         (start-time (float-time))
+         (ok (builder-emacs-conf-byte-compile-and-delete-artifact file))
+         (duration (* 1000.0 (- (float-time) start-time)))
+         (log (with-current-buffer (get-buffer-create "*Compile-Log*")
+                (save-excursion
+                  (goto-char (point-max))
+                  (forward-line -20)
+                  (buffer-substring-no-properties (point) (point-max))))))
+    (list :file file
+          :status (if ok "ok" "error")
+          :success (if ok t :json-false)
+          :duration_ms duration
+          :log log)))
+
+(mcpkit-register-tool 'byte_compile 'builder
+  :description "Alias for builder_byte_compile."
+  :input-schema '(:type "object"
+                  :properties (:file (:type "string" :description "Path to Elisp file"))
+                  :required ["file"])
+  (builder-mcp-call-tool 'builder_byte_compile args))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Tool 7: builder_check_parens / check_parens
+
+(mcpkit-register-tool 'builder_check_parens 'builder
+  :description "Check parenthesis balance in an Elisp file or buffer using check-parens."
+  :input-schema '(:type "object"
+                  :properties (:file (:type "string" :description "Path to Elisp file")
+                               :buffer_name (:type "string" :description "Buffer name to check"))
+                  :required [])
+  (let* ((file (plist-get args :file))
+         (buf-name (plist-get args :buffer_name))
+         (target-buf (or (and buf-name (get-buffer buf-name))
+                         (and file (find-file-noselect file)))))
+    (unless target-buf
+      (user-error "Must specify an existing file or buffer_name"))
+    (with-current-buffer target-buf
+      (condition-case err
+          (save-excursion
+            (save-restriction
+              (widen)
+              (goto-char (point-min))
+              (check-parens)
+              (list :status "ok" :balanced t :file file :buffer_name (buffer-name target-buf))))
+        (error
+         (list :status "error"
+               :balanced :json-false
+               :file file
+               :buffer_name (buffer-name target-buf)
+               :line (line-number-at-pos)
+               :column (current-column)
+               :error (error-message-string err)))))))
+
+(mcpkit-register-tool 'check_parens 'builder
+  :description "Alias for builder_check_parens."
+  :input-schema '(:type "object"
+                  :properties (:file (:type "string" :description "Path to Elisp file")
+                               :buffer_name (:type "string" :description "Buffer name"))
+                  :required [])
+  (builder-mcp-call-tool 'builder_check_parens args))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Tool 8: builder_run_tests / run_tests
+
+(mcpkit-register-tool 'builder_run_tests 'builder
+  :description "Run ERT tests for an Elisp package at ROOT or with an ERT selector."
+  :input-schema '(:type "object"
+                  :properties (:root (:type "string" :description "Optional package directory to test in isolated subprocess")
+                               :selector (:type "string" :description "Optional ERT selector regexp"))
+                  :required [])
+  (let* ((root (plist-get args :root))
+         (selector (plist-get args :selector)))
+    (if (and root (not (string-empty-p root)))
+        (let* ((ok (builder-emacs-conf-elisp-package-test-isolated root))
+               (log (with-current-buffer (get-buffer-create "*builder-test-check-log*")
+                      (buffer-substring-no-properties (point-min) (point-max)))))
+          (list :root root :status (if ok "ok" "error") :success (if ok t :json-false) :log log))
+      (let* ((sel (if selector (read selector) t))
+             (stats (ert sel))
+             (total (ert-stats-total stats))
+             (passed (ert-stats-completed-expected stats))
+             (unexpected (ert-stats-completed-unexpected stats)))
+        (list :selector (format "%s" sel)
+              :status (if (zerop unexpected) "ok" "failed")
+              :total total
+              :passed passed
+              :failed unexpected)))))
+
+(mcpkit-register-tool 'run_tests 'builder
+  :description "Alias for builder_run_tests."
+  :input-schema '(:type "object"
+                  :properties (:root (:type "string") :selector (:type "string"))
+                  :required [])
+  (builder-mcp-call-tool 'builder_run_tests args))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Tool 9: builder_load_file / load_file
+
+(mcpkit-register-tool 'builder_load_file 'builder
+  :description "Safely load an Elisp file into the live Emacs instance, catching any errors."
+  :input-schema '(:type "object"
+                  :properties (:file (:type "string" :description "Path to Elisp file to load"))
+                  :required ["file"])
+  (let* ((file (plist-get args :file)))
+    (unless (and file (file-exists-p file))
+      (user-error "File does not exist: %s" file))
+    (condition-case err
+        (progn
+          (load-file file)
+          (list :file file :status "ok" :loaded t))
+      (error
+       (list :file file :status "error" :loaded :json-false :error (error-message-string err))))))
+
+(mcpkit-register-tool 'load_file 'builder
+  :description "Alias for builder_load_file."
+  :input-schema '(:type "object"
+                  :properties (:file (:type "string" :description "Path to Elisp file"))
+                  :required ["file"])
+  (builder-mcp-call-tool 'builder_load_file args))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lifecycle & Orchestration
