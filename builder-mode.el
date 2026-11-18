@@ -36,7 +36,6 @@
 (defvar builder-elisp-ert-prevent-focus)
 (defvar go-ts-mode-map)
 (defvar go-ts-mode-hook)
-(defvar cov-mode-hook)
 (defvar cov-coverage-mode)
 (defvar cov-lcov-file-name)
 (defvar cov-coverage-file-paths)
@@ -92,18 +91,6 @@ Set to nil to disable automatic activation.  Changes take effect when
 (defvar builder--coverage-hooks nil
   "Hooks installed by the current `builder-mode' activation.")
 
-(defun builder--configure-cov ()
-  "Save and apply Builder's coverage settings."
-  (when (and (bound-and-true-p builder-mode)
-             (not (assq 'cov-coverage-mode builder-mode--saved-settings)))
-    (seq-do (lambda (pair)
-              (push (cons (car pair) (cons t (default-value (car pair))))
-                    builder-mode--saved-settings)
-              (set-default (car pair) (cdr pair)))
-            `((cov-coverage-mode . ,builder-coverage-display)
-              (cov-lcov-file-name . ,builder-coverage-lcov-file)
-              (cov-coverage-file-paths . ,builder-coverage-search-paths)))))
-
 (defvar builder--go-coverage-key-saved nil
   "Prior Go coverage key binding, wrapped in a list when installed.")
 
@@ -129,10 +116,12 @@ Set to nil to disable automatic activation.  Changes take effect when
     (setq builder--go-coverage-key-saved nil)))
 
 (defun builder--enable-cov ()
-  "Enable coverage in the current buffer when cov is installed."
+  "Configure coverage variables buffer-locally and enable `cov-mode'."
   (if (locate-library "cov")
       (progn
-        (builder--configure-cov)
+        (setq-local cov-coverage-mode builder-coverage-display)
+        (setq-local cov-lcov-file-name builder-coverage-lcov-file)
+        (setq-local cov-coverage-file-paths builder-coverage-search-paths)
         (cov-mode 1))
     (message "Builder: cov-mode skipped because cov is not installed")))
 
@@ -265,9 +254,6 @@ COMMAND is the default compile command string."
 
         ;; 4. Output buffer scrolling and line length
         (builder-mode--apply-settings)
-        (add-hook 'cov-mode-hook #'builder--configure-cov)
-        (when (featurep 'cov)
-          (builder--configure-cov))
 
         ;; 5. Keybindings in compilation-mode-map
         (when (boundp 'compilation-mode-map)
@@ -295,7 +281,6 @@ COMMAND is the default compile command string."
             (builder-elisp-enable-ert-advice))))
 
     ;; Disabling mode
-    (remove-hook 'cov-mode-hook #'builder--configure-cov)
     (remove-hook 'go-ts-mode-hook #'builder--install-go-coverage-key)
     (when (boundp 'go-ts-mode-map)
       (builder--remove-go-coverage-key))

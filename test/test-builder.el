@@ -22,10 +22,11 @@
 (defvar cov-lcov-file-name nil)
 (defvar cov-coverage-file-paths nil)
 (defvar builder-test-cov-mode-hook nil)
+(defvar go-ts-mode-hook nil)
 (defvar go-ts-mode-map)
 
 (ert-deftest builder-test/coverage-configuration-lifecycle ()
-  "Builder installs configured coverage settings and restores them."
+  "Builder installs configured coverage hooks and sets buffer-local cov settings."
   (let ((builder-mode nil)
         (builder-mode--saved-settings nil)
         (builder-coverage-modes '(builder-test-cov-mode))
@@ -33,7 +34,6 @@
         (builder-coverage-lcov-file "my/lcov.info")
         (builder-coverage-search-paths '("reports"))
         (builder-test-cov-mode-hook nil)
-        (cov-mode-hook nil)
         (go-ts-mode-hook nil)
         (builder-mode-enable-colorization nil)
         (builder-mode-enable-finish-alerts nil)
@@ -47,20 +47,21 @@
     (unwind-protect
         (progn
           (builder-mode 1)
-          (should (memq #'builder--configure-cov cov-mode-hook))
           (should (memq #'builder--install-go-coverage-key go-ts-mode-hook))
-          (builder--configure-cov)
           (should (memq #'builder--enable-cov builder-test-cov-mode-hook))
-          (should (eq cov-coverage-mode 'both))
-          (should (equal cov-lcov-file-name "my/lcov.info"))
-          (should (equal cov-coverage-file-paths '("reports")))
+          (with-temp-buffer
+            (cl-letf (((symbol-function 'locate-library) (lambda (&rest _) "cov.el"))
+                      ((symbol-function 'cov-mode) #'ignore))
+              (builder--enable-cov)
+              (should (eq cov-coverage-mode 'both))
+              (should (equal cov-lcov-file-name "my/lcov.info"))
+              (should (equal cov-coverage-file-paths '("reports")))))
+          (should (eq (default-value 'cov-coverage-mode) 'previous))
+          (should (equal (default-value 'cov-lcov-file-name) "old"))
           (setq builder-coverage-modes nil)
           (builder-mode -1)
-          (should-not (memq #'builder--configure-cov cov-mode-hook))
           (should-not (memq #'builder--install-go-coverage-key go-ts-mode-hook))
-          (should-not (memq #'builder--enable-cov builder-test-cov-mode-hook))
-          (should (eq cov-coverage-mode 'previous))
-          (should (equal cov-lcov-file-name "old")))
+          (should-not (memq #'builder--enable-cov builder-test-cov-mode-hook)))
       (when builder-mode (builder-mode -1)))))
 
 (ert-deftest builder-test/go-coverage-key-lifecycle ()
