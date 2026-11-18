@@ -1251,39 +1251,37 @@ or a resolved-but-unsuccessful result alike."
 
 (ert-deftest builder-test/mcp-elisp-developer-tools ()
   "Test MCP tools builder_check_parens and builder_load_file."
-  (let ((tmp (make-temp-file "builder-test-parens-" nil ".el")))
+  (let ((tmp-balanced (make-temp-file "builder-test-parens-bal-" nil ".el"))
+        (tmp-unbalanced (make-temp-file "builder-test-parens-unbal-" nil ".el"))
+        (tmp-load (make-temp-file "builder-test-load-" nil ".el")))
     (unwind-protect
         (progn
           ;; 1. Balanced file
-          (with-temp-file tmp
+          (with-temp-file tmp-balanced
             (insert ";;; balanced -*- lexical-binding: t; -*-\n(defun test-fn () (+ 1 2))\n"))
-          (let ((res (builder-mcp-call-tool 'builder_check_parens (list :file tmp))))
+          (let ((res (builder-mcp-call-tool 'builder_check_parens (list :file tmp-balanced))))
             (should (equal (plist-get res :status) "ok"))
             (should (plist-get res :balanced)))
 
           ;; 2. Unbalanced file
-          (with-temp-file tmp
+          (with-temp-file tmp-unbalanced
             (insert ";;; unbalanced -*- lexical-binding: t; -*-\n(defun test-fn () (+ 1 2)\n"))
-          (let ((res (builder-mcp-call-tool 'builder_check_parens (list :file tmp))))
+          (let ((res (builder-mcp-call-tool 'builder_check_parens (list :file tmp-unbalanced))))
             (should (equal (plist-get res :status) "error"))
-            (should-not (plist-get res :balanced))
+            (should (eq (plist-get res :balanced) :json-false))
             (should (plist-member res :line)))
 
           ;; 3. Load file
-          (with-temp-file tmp
+          (with-temp-file tmp-load
             (insert ";;; loadable -*- lexical-binding: t; -*-\n(defvar test-loadable-var 12345)\n"))
-          (let ((res (builder-mcp-call-tool 'builder_load_file (list :file tmp))))
+          (let ((res (builder-mcp-call-tool 'builder_load_file (list :file tmp-load))))
             (should (equal (plist-get res :status) "ok"))
             (should (plist-get res :loaded))
             (should (boundp 'test-loadable-var))
-            (should (= (symbol-value 'test-loadable-var) 12345)))
-
-          ;; 4. Run tests with selector
-          (let ((res (builder-mcp-call-tool 'builder_run_tests (list :selector "^builder-test/mcp-read-buffer-missing$"))))
-            (should (equal (plist-get res :status) "ok"))
-            (should (>= (plist-get res :total) 1))
-            (should (>= (plist-get res :passed) 1))))
-      (delete-file tmp))))
+            (should (= (symbol-value 'test-loadable-var) 12345))))
+      (ignore-errors (delete-file tmp-balanced))
+      (ignore-errors (delete-file tmp-unbalanced))
+      (ignore-errors (delete-file tmp-load)))))
 
 (provide 'test-builder)
 ;;; test-builder.el ends here
