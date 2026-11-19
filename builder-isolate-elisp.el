@@ -390,26 +390,34 @@ Cancels itself and prunes the eln cache once the queue drains."
       (when-let* ((stale (seq-filter #'builder--native-compile-stale-p chunk)))
         (native-compile-async stale)))))
 
+(defun builder--emacs-conf-candidate-files ()
+  "Return list of candidate .el files across user Emacs configuration and packages."
+  (let* ((root-files (directory-files user-emacs-directory t "\\`[^.#].*\\.el\\'"))
+         (lisp-dir (expand-file-name "lisp" user-emacs-directory))
+         (user-dir (expand-file-name "user" user-emacs-directory))
+         (elpa-dir (expand-file-name "elpa" user-emacs-directory)))
+    (seq-filter
+     #'file-regular-p
+     (append root-files
+             (when (file-directory-p lisp-dir)
+               (directory-files-recursively lisp-dir "\\`[^.#].*\\.el\\'"))
+             (when (file-directory-p user-dir)
+               (directory-files-recursively user-dir "\\`[^.#].*\\.el\\'"))
+             (when (file-directory-p elpa-dir)
+               (directory-files-recursively elpa-dir "\\`[^.#].*\\.el\\'"))))))
+
 ;;;###autoload
 (defun builder-emacs-conf-native-compile-all ()
-  "Incrementally native-compile stale .el files in lisp/ and elpa/.
+  "Incrementally native-compile stale .el files in configuration and packages.
 Collects candidate files, then hands them to
 `builder--native-compile-process-queue' to work through in bounded,
-staleness-checked chunks on an idle timer. Runs once on a 60-second idle
+staleness-checked chunks on an idle timer. Runs once on an idle
 timer after startup; also callable interactively for a fresh sweep."
   (interactive)
   (if (not (or (string-match "NATIVE_COMP" system-configuration-features)
                (fboundp 'native-compile-async)))
       (message "Native compilation not available in this build")
-    (let* ((lisp-dir (expand-file-name "lisp" user-emacs-directory))
-           (elpa-dir (expand-file-name "elpa" user-emacs-directory))
-           (files (seq-filter
-                   #'file-regular-p
-                   (append
-                    (when (file-directory-p lisp-dir)
-                      (directory-files-recursively lisp-dir "\\.el\\'"))
-                    (when (file-directory-p elpa-dir)
-                      (directory-files-recursively elpa-dir "\\.el\\'"))))))
+    (let ((files (builder--emacs-conf-candidate-files)))
       (setq builder--native-compile-queue files)
       (unless builder--native-compile-idle-timer
         (setq builder--native-compile-idle-timer
@@ -419,7 +427,58 @@ timer after startup; also callable interactively for a fresh sweep."
         (message "[builder]: queued %d .el files for incremental native compilation staleness check"
                  (length files))))))
 
+(defun builder-native-compile-wait (&optional timeout)
+  "Wait synchronously until all asynchronous native compilation tasks complete.
+TIMEOUT is the maximum number of seconds to wait (defaults to 300)."
+  (let ((start (current-time))
+        (max-wait (or timeout 300)))
+    (while (and (or (bound-and-true-p comp-files-queue)
+                    (and (fboundp 'comp--async-runnings)
+                         (> (comp--async-runnings) 0)))
+                (< (float-time (time-since start)) max-wait))
+      (sit-for 0.5))))
+
 (defvar bootstrap-vendored-packages)
+
+;;;###autoload
+(defun builder-emacs-conf-recompile-all (&optional force wait)
+  "Byte-recompile user configuration and native-compile all stale files.
+When FORCE is non-nil (with prefix argument `\\[universal-argument]`),
+force recompilation of all files even if `.elc' is up to date.
+When WAIT is non-nil (with double prefix argument `\\[universal-argument] \\[universal-argument]`),
+block until all background native compilation subprocesses finish.
+Returns the list of files queued for native compilation."
+  (interactive
+   (list (and current-prefix-arg (>= (prefix-numeric-value current-prefix-arg) 4))
+         (and current-prefix-arg (>= (prefix-numeric-value current-prefix-arg) 16))))
+  (let* ((candidates (builder--emacs-conf-candidate-files))
+         (recompiled (seq-keep (lambda (f)
+                                 (unless (eq 'no-byte-compile
+                                             (byte-recompile-file f force 0))
+                                   f))
+                               candidates))
+         (stale (when (and (string-match-p "NATIVE_COMP" system-configuration-features)
+                           (fboundp 'native-compile-async))
+                  (seq-filter #'builder--native-compile-stale-p candidates)))
+         (to-native (delete-dups (append recompiled stale))))
+    (when to-native
+      (native-compile-async to-native))
+    (message "[builder]: %d files recompiled, %d queued for native compilation%s"
+             (length recompiled)
+             (length to-native)
+             (if (and (fboundp 'comp--async-runnings) (> (comp--async-runnings) 0))
+                 (format " (%d workers running)" (comp--async-runnings))
+               ""))
+    (when wait
+      (message "[builder]: awaiting native compilation completion...")
+      (builder-native-compile-wait)
+      (when (fboundp 'native-compile-prune-cache)
+        (native-compile-prune-cache))
+      (message "[builder]: all byte and native compilation complete."))
+    to-native))
+
+;;;###autoload
+(defalias 'builder-recompile-all #'builder-emacs-conf-recompile-all)
 
 ;;;###autoload
 (defun builder-emacs-conf-byte-recompile-directory ()
@@ -427,15 +486,20 @@ timer after startup; also callable interactively for a fresh sweep."
 With a prefix argument, force recompilation of every file regardless of timestamps.
 Returns the list of files that were recompiled."
   (interactive)
-  (thread-last (cons user-emacs-directory
-                     (seq-filter #'file-directory-p
-                                 (directory-files user-emacs-directory t "^[^.]")))
-               (seq-mapcat (lambda (dir) (directory-files dir t "\\.el\\'")))
-               (seq-filter #'file-regular-p)
-               (seq-keep (lambda (f)
-                           (unless (eq 'no-byte-compile
-                                       (byte-recompile-file f current-prefix-arg))
-                             f)))))
+  (let ((recompiled (thread-last (cons user-emacs-directory
+                                       (seq-filter #'file-directory-p
+                                                   (directory-files user-emacs-directory t "^[^.]")))
+                                 (seq-mapcat (lambda (dir) (directory-files dir t "\\.el\\'")))
+                                 (seq-filter #'file-regular-p)
+                                 (seq-keep (lambda (f)
+                                             (unless (eq 'no-byte-compile
+                                                         (byte-recompile-file f current-prefix-arg))
+                                               f))))))
+    (when (and recompiled
+               (string-match-p "NATIVE_COMP" system-configuration-features)
+               (fboundp 'native-compile-async))
+      (native-compile-async recompiled))
+    recompiled))
 
 ;;;###autoload
 (defun builder-emacs-conf-recompile-vendored-packages ()
