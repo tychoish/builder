@@ -889,12 +889,13 @@ Calls `builder-org-babel-execute-file' on each file found by
 	 :command (format "emacs --batch -L %s -f package-initialize --eval \"(require 'builder)\" -f %s" lisp-dir fn)
 	 :directory project-root-directory
 	 :annotation (format "%s elisp package <%s>" desc display-name))))
-    '(("check-package"   "elpaish-run-checks" "run all checks (lint/test/compile) for")
-      ("test-package"    "builder-elisp-package-test"    "run ert tests for")
-      ("compile-package" "builder-elisp-package-compile" "byte-compile sources of")
-      ("lint-package"    "builder-elisp-package-lint"    "run linters (byte-compile/checkdoc/package-lint) for")
-      ("build-package"   "builder-elisp-package-build"   "build installable .tar via package-build for")
-      ("clean-package"   "builder-elisp-package-clean"   "remove build artifacts of")))))
+    '(("check-package"     "elpaish-run-checks" "run all checks (lint/test/compile) for")
+      ("preflight-package" "builder-elisp-package-preflight" "run preflight static analysis & byte-compile for")
+      ("test-package"      "builder-elisp-package-test"    "run ert tests for")
+      ("compile-package"   "builder-elisp-package-compile" "byte-compile sources of")
+      ("lint-package"      "builder-elisp-package-lint"    "run linters (byte-compile/checkdoc/package-lint) for")
+      ("build-package"     "builder-elisp-package-build"   "build installable .tar via package-build for")
+      ("clean-package"     "builder-elisp-package-clean"   "remove build artifacts of")))))
 
 (builder-register-candidates
  :no-hook t
