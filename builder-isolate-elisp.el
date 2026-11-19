@@ -390,21 +390,27 @@ Cancels itself and prunes the eln cache once the queue drains."
       (when-let* ((stale (seq-filter #'builder--native-compile-stale-p chunk)))
         (native-compile-async stale)))))
 
-(defun builder--emacs-conf-candidate-files ()
-  "Return list of candidate .el files across user Emacs configuration and packages."
+(defun builder--emacs-conf-user-files ()
+  "Return list of user configuration `.el' files in root, lisp/, and user/."
   (let* ((root-files (directory-files user-emacs-directory t "\\`[^.#].*\\.el\\'"))
          (lisp-dir (expand-file-name "lisp" user-emacs-directory))
-         (user-dir (expand-file-name "user" user-emacs-directory))
-         (elpa-dir (expand-file-name "elpa" user-emacs-directory)))
+         (user-dir (expand-file-name "user" user-emacs-directory)))
     (seq-filter
      #'file-regular-p
      (append root-files
              (when (file-directory-p lisp-dir)
                (directory-files-recursively lisp-dir "\\`[^.#].*\\.el\\'"))
              (when (file-directory-p user-dir)
-               (directory-files-recursively user-dir "\\`[^.#].*\\.el\\'"))
-             (when (file-directory-p elpa-dir)
-               (directory-files-recursively elpa-dir "\\`[^.#].*\\.el\\'"))))))
+               (directory-files-recursively user-dir "\\`[^.#].*\\.el\\'"))))))
+
+(defun builder--emacs-conf-candidate-files ()
+  "Return list of candidate .el files across user Emacs configuration and packages."
+  (let ((user-files (builder--emacs-conf-user-files))
+        (elpa-dir (expand-file-name "elpa" user-emacs-directory)))
+    (append user-files
+            (when (file-directory-p elpa-dir)
+              (seq-filter #'file-regular-p
+                          (directory-files-recursively elpa-dir "\\`[^.#].*\\.el\\'"))))))
 
 ;;;###autoload
 (defun builder-emacs-conf-native-compile-all ()
@@ -451,19 +457,20 @@ Returns the list of files queued for native compilation."
   (interactive
    (list (and current-prefix-arg (>= (prefix-numeric-value current-prefix-arg) 4))
          (and current-prefix-arg (>= (prefix-numeric-value current-prefix-arg) 16))))
-  (let* ((candidates (builder--emacs-conf-candidate-files))
+  (let* ((user-files (builder--emacs-conf-user-files))
          (recompiled (seq-keep (lambda (f)
                                  (unless (eq 'no-byte-compile
                                              (byte-recompile-file f force 0))
                                    f))
-                               candidates))
+                               user-files))
+         (all-candidates (builder--emacs-conf-candidate-files))
          (stale (when (and (string-match-p "NATIVE_COMP" system-configuration-features)
                            (fboundp 'native-compile-async))
-                  (seq-filter #'builder--native-compile-stale-p candidates)))
+                  (seq-filter #'builder--native-compile-stale-p all-candidates)))
          (to-native (delete-dups (append recompiled stale))))
     (when to-native
       (native-compile-async to-native))
-    (message "[builder]: %d files recompiled, %d queued for native compilation%s"
+    (message "[builder]: %d config files recompiled, %d queued for native compilation%s"
              (length recompiled)
              (length to-native)
              (if (and (fboundp 'comp--async-runnings) (> (comp--async-runnings) 0))

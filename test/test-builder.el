@@ -1534,7 +1534,7 @@ or a resolved-but-unsuccessful result alike."
               (should (member root-file recompiled))
               (should (member lisp-file recompiled))
               (should (member user-file recompiled))
-              (should (member pkg-file recompiled))
+              (should-not (member pkg-file recompiled))
               (should (member root-file native-queued))
               (should (member pkg-file native-queued))
               (should wait-called)
