@@ -20,6 +20,7 @@
 (require 'savehist)
 (require 'ansi-color)
 (require 'seq)
+(require 'warnings)
 
 (autoload 'cov-mode "cov" nil t)
 (autoload 'builder-go-coverage-and-convert "builder-tasks" nil t)
@@ -202,7 +203,9 @@ COMMAND is the default compile command string."
 
 (defcustom builder-mode-managed-settings
   '((compilation-scroll-output . t)
-    (compilation-max-output-line-length . nil))
+    (compilation-max-output-line-length . nil)
+    (warning-suppress-log-types . ((frameset)))
+    (warning-suppress-types . ((files missing-lexbind-cookie))))
   "Alist of (SYMBOL . VALUE) settings managed globally by `builder-mode'."
   :type '(alist :key-type symbol :value-type sexp)
   :group 'builder-mode)
@@ -216,9 +219,17 @@ COMMAND is the default compile command string."
   (seq-do (lambda (pair)
             (let ((sym (car pair))
                   (val (cdr pair)))
-              (push (cons sym (if (boundp sym) (cons t (symbol-value sym)) (cons nil nil)))
-                    builder-mode--saved-settings)
-              (set sym val)))
+              (when (memq sym '(warning-suppress-log-types warning-suppress-types))
+                (require 'warnings))
+              (let ((prior (and (boundp sym) (symbol-value sym))))
+                (push (cons sym (if (boundp sym)
+                                    (cons t (if (consp prior) (copy-sequence prior) prior))
+                                  (cons nil nil)))
+                      builder-mode--saved-settings))
+              (if (memq sym '(warning-suppress-log-types warning-suppress-types))
+                  (dolist (item val)
+                    (add-to-list sym item))
+                (set sym val))))
           builder-mode-managed-settings))
 
 (defun builder-mode--revert-settings ()
@@ -302,6 +313,9 @@ COMMAND is the default compile command string."
                         (buffer-list))
         (builder-elisp-disable-ert-advice)))
     (builder-mode--revert-settings)))
+
+;;;###autoload
+(defalias 'builder-global-mode #'builder-mode)
 
 (provide 'builder-mode)
 ;;; builder-mode.el ends here

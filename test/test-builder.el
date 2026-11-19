@@ -1128,17 +1128,27 @@ or a resolved-but-unsuccessful result alike."
         (progn
           (when was-on (builder-mode -1))
           (let ((compilation-scroll-output nil)
-                (compilation-max-output-line-length 500))
+                (compilation-max-output-line-length 500)
+                (warning-suppress-log-types nil)
+                (warning-suppress-types nil))
             (builder-mode 1)
             (should (eq compilation-scroll-output t))
             (should (null compilation-max-output-line-length))
+            (should (member '(frameset) warning-suppress-log-types))
+            (should (member '(files missing-lexbind-cookie) warning-suppress-types))
             (builder-mode -1)
             (should (null compilation-scroll-output))
-            (should (eq compilation-max-output-line-length 500))))
+            (should (eq compilation-max-output-line-length 500))
+            (should-not (member '(frameset) warning-suppress-log-types))
+            (should-not (member '(files missing-lexbind-cookie) warning-suppress-types))))
       (if was-on
           (builder-mode 1)
         (when (bound-and-true-p builder-mode)
           (builder-mode -1))))))
+
+(ert-deftest builder-test/global-mode-alias ()
+  "Verify `builder-global-mode' is an alias for `builder-mode'."
+  (should (eq (symbol-function 'builder-global-mode) #'builder-mode)))
 
 (ert-deftest builder-test/elisp-mode-lifecycle ()
   "Enabling `builder-elisp-mode' sets local warnings and checkdoc flags."
