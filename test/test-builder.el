@@ -1486,5 +1486,82 @@ or a resolved-but-unsuccessful result alike."
               (should (member el-file recompiled)))))
       (delete-directory temp-emacs t))))
 
+(ert-deftest builder-test/elisp-check-alias-order ()
+  "Test `builder-elisp-check-alias-order' catches aliases declared after defcustoms."
+  (with-temp-buffer
+    (insert "(defcustom test-var nil \"doc\" :type 'boolean)\n"
+            "(defvaralias 'test-alias 'test-var)\n")
+    (let ((errs (builder-elisp-check-alias-order (current-buffer))))
+      (should (= (length errs) 1))
+      (should (string-match-p "test-alias" (car errs)))))
+  (with-temp-buffer
+    (insert "(defvaralias 'test-alias 'test-var)\n"
+            "(defcustom test-var nil \"doc\" :type 'boolean)\n")
+    (should (null (builder-elisp-check-alias-order (current-buffer))))))
+
+(ert-deftest builder-test/elisp-check-docstrings ()
+  "Test `builder-elisp-check-docstrings' catches lines exceeding 80 characters."
+  (with-temp-buffer
+    (insert "(defcustom test-wide nil\n"
+            "  \"This is an excessively long first line in a docstring that goes beyond eighty columns.\"\n"
+            "  :type 'boolean)\n")
+    (let ((errs (builder-elisp-check-docstrings (current-buffer))))
+      (should (= (length errs) 1))
+      (should (string-match-p "exceeds 80 characters" (car errs)))))
+  (with-temp-buffer
+    (insert "(defcustom test-wide-line2 nil\n"
+            "  \"First line short.\n"
+            "This second line in the defcustom is way too long and extends past eighty columns limit.\"\n"
+            "  :type 'boolean)\n")
+    (let ((errs (builder-elisp-check-docstrings (current-buffer))))
+      (should (= (length errs) 1))
+      (should (string-match-p "line 2 exceeds 80 characters" (car errs)))))
+  (with-temp-buffer
+    (insert "(defun test-ok ()\n"
+            "  \"Short docstring.\"\n"
+            "  nil)\n")
+    (should (null (builder-elisp-check-docstrings (current-buffer))))))
+
+(ert-deftest builder-test/elisp-check-ci-workflows ()
+  "Test `builder-elisp-check-ci-workflows' flags missing elpaish configuration."
+  (let* ((temp-dir (file-name-as-directory (make-temp-file "builder-ci-test-" t)))
+         (wf-dir (expand-file-name ".github/workflows" temp-dir))
+         (wf-file (expand-file-name "ci.yml" wf-dir)))
+    (unwind-protect
+        (progn
+          (make-directory wf-dir t)
+          (with-temp-file wf-file
+            (insert "name: CI\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@v5\n"))
+          (cl-letf (((symbol-function 'builder-elisp-package--read-deps)
+                     (lambda (_) '(hitl seq))))
+            (let ((errs (builder-elisp-check-ci-workflows temp-dir)))
+              (should (= (length errs) 1))
+              (should (string-match-p "ELPAish" (car errs)))))
+          (with-temp-file wf-file
+            (insert "name: CI\njobs:\n  test:\n    env:\n      ELISP_CI_ELPAISH: \"true\"\n"))
+          (cl-letf (((symbol-function 'builder-elisp-package--read-deps)
+                     (lambda (_) '(hitl seq))))
+            (should (null (builder-elisp-check-ci-workflows temp-dir)))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest builder-test/elisp-package-preflight ()
+  "Test `builder-elisp-package-preflight' succeeds on clean packages and fails on violations."
+  (let* ((temp-dir (file-name-as-directory (make-temp-file "builder-preflight-" t)))
+         (pkg-name (file-name-nondirectory (directory-file-name temp-dir)))
+         (main-file (expand-file-name (concat pkg-name ".el") temp-dir)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name ".git" temp-dir) t)
+          (with-temp-file main-file
+            (insert ";;; -*- lexical-binding: t; -*-\n"
+                    "(defun test-fn ()\n  \"Docstring.\"\n  t)\n"
+                    (format "(provide '%s)\n" pkg-name)))
+          (cl-letf (((symbol-function 'approximate-project-root) (lambda () temp-dir))
+                    ((symbol-function 'byte-compile-file) (lambda (_) t)))
+            (should (builder-elisp-package-preflight temp-dir))))
+      (when-let* ((buf (find-buffer-visiting main-file)))
+        (kill-buffer buf))
+      (delete-directory temp-dir t))))
+
 (provide 'test-builder)
 ;;; test-builder.el ends here

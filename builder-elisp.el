@@ -84,6 +84,62 @@ Omitted warnings: `free-vars', `docstrings-wide'."
   :type 'boolean
   :group 'builder-elisp)
 
+(defcustom builder-elisp-elpaish-packages
+  '(agent-shell
+    agent-shell-menu
+    agent-shell-notifications
+    agent-shell-queue
+    agent-shell-workflow
+    annotated-completing-read
+    arch
+    builder
+    chex
+    clix
+    cmdr
+    code-review
+    daemons-dash
+    dbx
+    denote-convert
+    denote-dash
+    denote-mcp
+    denote-review
+    denote-sequence
+    denote-sync
+    denote-tree
+    efrit
+    eglot-test-at-point
+    eglox
+    elpaish
+    fun
+    gen
+    gptel-mcp
+    gptel-pup
+    grepx
+    grip
+    hitl
+    hud-modeline
+    jasper
+    logx
+    magit-dash
+    mcpkit
+    minaid
+    odem
+    ollama-tailnet
+    org-docsgen
+    orgx
+    overmark
+    sardis
+    sprite
+    sprite-mcp
+    tailscale
+    telega-bot
+    telegax
+    xlib
+    xtdlib)
+  "List of package symbols hosted on the ELPAish repository."
+  :type '(repeat symbol)
+  :group 'builder-elisp)
+
 (defvar-keymap builder-elisp-mode-map
   :doc "Keymap for `builder-elisp-mode'.")
 
@@ -438,6 +494,139 @@ ORIG-FN and ARGS identify the original ERT invocation."
   (advice-remove 'ert--results-update-stats-display #'builder--ert-results-update-stats-display-advice)
   (advice-remove 'ert-run-tests-interactively #'builder--ert-no-focus-advice))
 
+(defun builder-elisp-check-alias-order (file-or-buffer)
+  "Check that `defvaralias' declarations appear before their `defcustom' referents.
+FILE-OR-BUFFER is a file path or live buffer.  Returns a list of error strings."
+  (let (defcustoms errors)
+    (with-current-buffer (if (bufferp file-or-buffer)
+                             file-or-buffer
+                           (find-file-noselect file-or-buffer))
+      (save-excursion
+        (goto-char (point-min))
+        (let ((form nil))
+          (while (setq form (ignore-errors (read (current-buffer))))
+            (pcase form
+              (`(defcustom ,sym . ,_)
+               (push sym defcustoms))
+              (`(defvaralias ,alias ,referent . ,_)
+               (let ((ref-sym (cond ((and (consp referent) (eq (car referent) 'quote)) (cadr referent))
+                                    ((symbolp referent) referent)
+                                    (t nil)))
+                     (alias-sym (cond ((and (consp alias) (eq (car alias) 'quote)) (cadr alias))
+                                      ((symbolp alias) alias)
+                                      (t nil))))
+                 (when (and ref-sym (memq ref-sym defcustoms))
+                   (push (format "Alias `%s' should be declared before referent defcustom `%s'"
+                                 alias-sym ref-sym)
+                         errors)))))))))
+    (nreverse errors)))
+
+(defun builder-elisp-check-docstrings (file-or-buffer &optional max-col)
+  "Check docstrings in FILE-OR-BUFFER for width violations exceeding MAX-COL (default 80).
+Checks first lines of all definitions and all lines of `defcustom'.
+Returns a list of error strings."
+  (let ((limit (or max-col 80))
+        errors)
+    (with-current-buffer (if (bufferp file-or-buffer)
+                             file-or-buffer
+                           (find-file-noselect file-or-buffer))
+      (save-excursion
+        (goto-char (point-min))
+        (let ((form nil))
+          (while (setq form (ignore-errors (read (current-buffer))))
+            (pcase form
+              (`(,(and type (or 'defcustom 'defvar 'defun 'defmacro 'cl-defun 'cl-defmacro)) ,sym . ,_)
+               (let ((doc (nth 3 form)))
+                 (when (stringp doc)
+                   (let ((lines (split-string doc "\n")))
+                     (let ((first-line (car lines)))
+                       (when (> (length first-line) limit)
+                         (push (format "Docstring first line for `%s' exceeds %d characters (%d chars)"
+                                       sym limit (length first-line))
+                               errors)))
+                     (when (eq type 'defcustom)
+                       (seq-do-indexed
+                        (lambda (line idx)
+                          (when (and (> idx 0) (> (length line) limit))
+                            (push (format "Defcustom `%s' docstring line %d exceeds %d characters (%d chars)"
+                                          sym (1+ idx) limit (length line))
+                                  errors)))
+                        lines)))))))))))
+    (nreverse errors)))
+
+(defun builder-elisp-check-ci-workflows (root)
+  "Check that ROOT's CI workflows opt into ELPAish if ELPAish packages are required.
+Returns a list of error strings."
+  (let* ((deps (builder-elisp-package--read-deps root))
+         (elpaish-deps (seq-filter (lambda (dep) (memq dep builder-elisp-elpaish-packages)) deps))
+         (workflow-dir (f-join root ".github" "workflows"))
+         errors)
+    (when (and elpaish-deps (file-directory-p workflow-dir))
+      (let* ((yaml-files (f-entries workflow-dir
+                                    (lambda (f) (member (file-name-extension f) '("yml" "yaml")))))
+             (configured nil))
+        (seq-do (lambda (file)
+                  (with-temp-buffer
+                    (insert-file-contents file)
+                    (when (re-search-forward "\\(ELISP_CI_ELPAISH\\|elpaish[[:space:]]*:[[:space:]]*true\\|include-elpaish[[:space:]]*:[[:space:]]*true\\)" nil t)
+                      (setq configured t))))
+                yaml-files)
+        (unless configured
+          (push (format "Package requires ELPAish dependencies %S, but .github/workflows does not enable ELPAish (set `elpaish: true' or `ELISP_CI_ELPAISH: \"true\"')"
+                        elpaish-deps)
+                errors))))
+    errors))
+
+(defun builder-elisp-lint-file (file-or-buffer)
+  "Run static analysis checks on FILE-OR-BUFFER.
+Checks docstrings and alias order.  Returns a list of error strings."
+  (append (builder-elisp-check-alias-order file-or-buffer)
+          (builder-elisp-check-docstrings file-or-buffer)))
+
+;;;###autoload
+(defun builder-elisp-package-preflight (&optional root)
+  "Run preflight validation on the package at ROOT (or project root).
+Validates CI workflow configurations, file-level static checks, and byte-compilation.
+Returns t if all checks pass, nil otherwise."
+  (interactive)
+  (pcase-let* ((`(,pkg-root ,name ,_main) (builder-elisp-package--resolve root t))
+               (sources (builder-elisp-package--source-files pkg-root))
+               (failed 0))
+    (message "[builder-preflight] running preflight checks for %s..." name)
+    (let ((ci-errors (builder-elisp-check-ci-workflows pkg-root)))
+      (seq-do (lambda (err)
+                (message "[builder-preflight] [CI CONFIG ERROR] %s" err)
+                (cl-incf failed))
+              ci-errors))
+    (seq-do (lambda (src)
+              (let ((errs (builder-elisp-lint-file src)))
+                (seq-do (lambda (err)
+                          (message "[builder-preflight] [LINT ERROR] %s: %s"
+                                   (file-name-nondirectory src) err)
+                          (cl-incf failed))
+                        errs)))
+            sources)
+    (let ((byte-compile-error-on-warn t)
+          (byte-compile-warnings (if (memq 'docstrings-wide (bound-and-true-p byte-compile-warning-types))
+                                     (cons 'docstrings-wide builder-elisp-byte-compile-warnings)
+                                   builder-elisp-byte-compile-warnings))
+          (load-path (cons pkg-root load-path)))
+      (seq-do (lambda (src)
+                (unless (byte-compile-file src)
+                  (message "[builder-preflight] [COMPILE ERROR] failed to compile %s"
+                           (file-name-nondirectory src))
+                  (cl-incf failed))
+                (let ((elc (concat (file-name-sans-extension src) ".elc")))
+                  (when (file-exists-p elc)
+                    (delete-file elc))))
+              sources))
+    (if (zerop failed)
+        (progn
+          (message "[builder-preflight] all preflight checks passed for %s" name)
+          t)
+      (message "[builder-preflight] preflight failed with %d error(s)" failed)
+      nil)))
+
 ;;;###autoload
 (defun builder-elisp-package-compile ()
   "Byte-compile every top-level .el source file in the elisp package at point.
@@ -465,12 +654,28 @@ In batch mode exits with status 1 if any file fails linting or compilation."
                (sources (builder-elisp-package--source-files root))
                (failed 0))
     (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
+    ;; 1. Static and workflow checks
+    (let ((ci-errors (builder-elisp-check-ci-workflows root)))
+      (seq-do (lambda (err)
+                (message "[builder-lint] [CI ERROR]: %s" err)
+                (cl-incf failed))
+              ci-errors))
+    (seq-do (lambda (it)
+              (let ((static-errors (builder-elisp-lint-file it)))
+                (seq-do (lambda (err)
+                          (message "[builder-lint] [STATIC ERROR] %s: %s"
+                                   (file-name-nondirectory it) err)
+                          (cl-incf failed))
+                        static-errors)))
+            sources)
     (let* ((load-path (cons root load-path))
-           (byte-compile-warnings builder-elisp-byte-compile-warnings)
+           (byte-compile-warnings (if (memq 'docstrings-wide (bound-and-true-p byte-compile-warning-types))
+                                      (cons 'docstrings-wide builder-elisp-byte-compile-warnings)
+                                    builder-elisp-byte-compile-warnings))
            (checkdoc-force-docstrings-flag builder-elisp-checkdoc-force-docstrings-flag)
            (checkdoc-spellcheck-documentation-flag builder-elisp-checkdoc-spellcheck-documentation-flag)
            (byte-compile-error-on-warn t))
-      ;; 1. Byte-compilation
+      ;; 2. Byte-compilation
       (seq-do (lambda (it)
                 (message "[builder-lint] byte-compiling %s..." (file-name-nondirectory it))
                 (unless (byte-compile-file it)
@@ -479,7 +684,7 @@ In batch mode exits with status 1 if any file fails linting or compilation."
                   (when (file-exists-p elc)
                     (delete-file elc))))
               sources)
-      ;; 2. Checkdoc
+      ;; 3. Checkdoc
       (require 'checkdoc)
       (seq-do (lambda (it)
                 (message "[builder-lint] checkdoc %s..." (file-name-nondirectory it))
@@ -487,7 +692,7 @@ In batch mode exits with status 1 if any file fails linting or compilation."
                   (let ((checkdoc-diagnostic-buffer "*checkdoc-diagnostics*"))
                     (checkdoc-current-buffer t))))
               sources)
-      ;; 3. Package-lint (when available)
+      ;; 4. Package-lint (when available)
       (when (require 'package-lint nil t)
         (seq-do (lambda (it)
                   (message "[builder-lint] package-lint %s..." (file-name-nondirectory it))
