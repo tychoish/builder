@@ -200,16 +200,18 @@ COMMAND is the default compile command string."
     map)
   "Keymap for `builder-mode'.")
 
-(defvar builder-mode--managed-settings
+(defcustom builder-mode-managed-settings
   '((compilation-scroll-output . t)
     (compilation-max-output-line-length . nil))
-  "Alist of (SYMBOL . VALUE) settings managed globally by `builder-mode'.")
+  "Alist of (SYMBOL . VALUE) settings managed globally by `builder-mode'."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'builder-mode)
 
 (defvar builder-mode--saved-settings nil
   "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before enabling `builder-mode'.")
 
 (defun builder-mode--apply-settings ()
-  "Save previous values and apply `builder-mode--managed-settings'."
+  "Save previous values and apply `builder-mode-managed-settings'."
   (setq builder-mode--saved-settings nil)
   (seq-do (lambda (pair)
             (let ((sym (car pair))
@@ -217,7 +219,7 @@ COMMAND is the default compile command string."
               (push (cons sym (if (boundp sym) (cons t (symbol-value sym)) (cons nil nil)))
                     builder-mode--saved-settings)
               (set sym val)))
-          builder-mode--managed-settings))
+          builder-mode-managed-settings))
 
 (defun builder-mode--revert-settings ()
   "Restore variables to their state prior to `builder-mode'."
