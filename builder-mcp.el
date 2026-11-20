@@ -191,7 +191,7 @@
     (nreverse buffers)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Tool 6: builder_byte_compile / byte_compile
+;; Tool 6: builder_byte_compile (alias: byte_compile)
 
 (mcpkit-register-tool 'builder_byte_compile 'builder
   :description "Byte-compile an Elisp file in an isolated subprocess and delete the artifact (.elc)."
@@ -213,15 +213,11 @@
           :duration_ms duration
           :log log)))
 
-(mcpkit-register-tool 'byte_compile 'builder
-  :description "Alias for builder_byte_compile."
-  :input-schema '(:type "object"
-                  :properties (:file (:type "string" :description "Path to Elisp file"))
-                  :required ["file"])
-  (builder-mcp-call-tool 'builder_byte_compile args))
+(when (fboundp (quote mcpkit-register-tool-alias))
+  (mcpkit-register-tool-alias "byte_compile" "builder_byte_compile"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Tool 7: builder_check_parens / check_parens
+;; Tool 7: builder_check_parens (alias: check_parens)
 
 (mcpkit-register-tool 'builder_check_parens 'builder
   :description "Check parenthesis balance in an Elisp file or buffer using check-parens."
@@ -252,13 +248,8 @@
                :column (current-column)
                :error (error-message-string err)))))))
 
-(mcpkit-register-tool 'check_parens 'builder
-  :description "Alias for builder_check_parens."
-  :input-schema '(:type "object"
-                  :properties (:file (:type "string" :description "Path to Elisp file")
-                               :buffer_name (:type "string" :description "Buffer name"))
-                  :required [])
-  (builder-mcp-call-tool 'builder_check_parens args))
+(when (fboundp (quote mcpkit-register-tool-alias))
+  (mcpkit-register-tool-alias "check_parens" "builder_check_parens"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tool 8: builder_run_tests / run_tests
@@ -287,12 +278,8 @@
               :passed passed
               :failed unexpected)))))
 
-(mcpkit-register-tool 'run_tests 'builder
-  :description "Alias for builder_run_tests."
-  :input-schema '(:type "object"
-                  :properties (:root (:type "string") :selector (:type "string"))
-                  :required [])
-  (builder-mcp-call-tool 'builder_run_tests args))
+(when (fboundp (quote mcpkit-register-tool-alias))
+  (mcpkit-register-tool-alias "run_tests" "builder_run_tests"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tool 9: builder_load_file / load_file
@@ -312,12 +299,8 @@
       (error
        (list :file file :status "error" :loaded :json-false :error (error-message-string err))))))
 
-(mcpkit-register-tool 'load_file 'builder
-  :description "Alias for builder_load_file."
-  :input-schema '(:type "object"
-                  :properties (:file (:type "string" :description "Path to Elisp file"))
-                  :required ["file"])
-  (builder-mcp-call-tool 'builder_load_file args))
+(when (fboundp (quote mcpkit-register-tool-alias))
+  (mcpkit-register-tool-alias "load_file" "builder_load_file"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lifecycle & Orchestration
