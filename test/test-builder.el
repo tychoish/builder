@@ -1493,6 +1493,7 @@ or a resolved-but-unsuccessful result alike."
   "Test `builder--emacs-conf-candidate-files' and `builder-emacs-conf-recompile-all'."
   (let* ((temp-emacs (file-name-as-directory (make-temp-file "builder-recompile-all-" t)))
          (user-emacs-directory temp-emacs)
+         (system-configuration-features "NATIVE_COMP")
          (root-file (expand-file-name "early-init.el" temp-emacs))
          (lisp-dir (expand-file-name "lisp" temp-emacs))
          (lisp-file (expand-file-name "core.el" lisp-dir))
