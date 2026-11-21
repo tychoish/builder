@@ -323,44 +323,49 @@ does, then runs only the tests those files defined, narrowed by SELECTOR
 \(a regexp), PREFIX (a name prefix) and GLOB (a wildcard pattern) when
 non-nil.  Returns :status, :total, :passed, :failed, :skipped and
 :failing (a vector of plists with :name and :condition).  Never signals."
-  (condition-case err
-      (progn
-        (require 'ert)
-        (pcase-let ((`(,root ,_name ,main-file) (builder-elisp-package--resolve root 'error)))
-          (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
-          (let* ((test-dir (f-join root "test"))
-                 (load-path (append (seq-filter #'identity
-                                                (list root (and (file-directory-p test-dir) test-dir)))
-                                    load-path))
-                 (known-before (ert-select-tests t t))
-                 (glob-re (and glob (wildcard-to-regexp glob))))
-            (load main-file nil t)
-            (seq-do (lambda (it) (unless (f-equal-p it main-file) (load it nil t)))
-                    (builder-elisp-package--source-files root))
-            (seq-do (lambda (it) (load it nil t)) (builder-elisp-package--test-files root))
-            (let* ((tests (seq-filter
-                           (lambda (test)
-                             (let ((name (symbol-name (ert-test-name test))))
-                               (and (or (null selector) (string-match-p selector name))
-                                    (or (null prefix) (string-prefix-p prefix name))
-                                    (or (null glob-re) (string-match-p glob-re name)))))
-                           (seq-difference (ert-select-tests t t) known-before)))
-                   (stats (ert-run-tests (cons 'member tests) #'ignore))
-                   (failing nil))
-              (cl-loop for test across (ert--stats-tests stats)
-                       for result across (ert--stats-test-results stats)
-                       unless (or (null result) (ert-test-result-expected-p test result))
-                       do (push (list :name (symbol-name (ert-test-name test))
-                                      :condition (builder-emacs-conf--ert-result-condition result))
-                                failing))
-              (list :status (if (and tests (zerop (ert-stats-completed-unexpected stats))) "ok" "failed")
-                    :total (ert-stats-total stats)
-                    :passed (ert-stats-completed-expected stats)
-                    :failed (ert-stats-completed-unexpected stats)
-                    :skipped (ert-stats-skipped stats)
-                    :failing (vconcat (nreverse failing))
-                    :error (and (null tests) "no tests matched"))))))
-    (error (list :status "error" :error (error-message-string err)))))
+  ;; `ert-run-tests' must run outside any `condition-case': before Emacs 30
+  ;; ERT detects failures through the debugger, which an enclosing handler
+  ;; for `error' would pre-empt, turning a failing test into an escaped signal.
+  (let ((tests (condition-case err
+                   (progn
+                     (require 'ert)
+                     (pcase-let ((`(,root ,_name ,main-file) (builder-elisp-package--resolve root 'error)))
+                       (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
+                       (let* ((test-dir (f-join root "test"))
+                              (load-path (append (seq-filter #'identity
+                                                             (list root (and (file-directory-p test-dir) test-dir)))
+                                                 load-path))
+                              (known-before (ert-select-tests t t))
+                              (glob-re (and glob (wildcard-to-regexp glob))))
+                         (load main-file nil t)
+                         (seq-do (lambda (it) (unless (f-equal-p it main-file) (load it nil t)))
+                                 (builder-elisp-package--source-files root))
+                         (seq-do (lambda (it) (load it nil t)) (builder-elisp-package--test-files root))
+                         (seq-filter
+                          (lambda (test)
+                            (let ((name (symbol-name (ert-test-name test))))
+                              (and (or (null selector) (string-match-p selector name))
+                                   (or (null prefix) (string-prefix-p prefix name))
+                                   (or (null glob-re) (string-match-p glob-re name)))))
+                          (seq-difference (ert-select-tests t t) known-before)))))
+                 (error (error-message-string err)))))
+    (if (stringp tests)
+        (list :status "error" :error tests)
+      (let ((stats (ert-run-tests (cons 'member tests) #'ignore))
+            (failing nil))
+        (cl-loop for test across (ert--stats-tests stats)
+                 for result across (ert--stats-test-results stats)
+                 unless (or (null result) (ert-test-result-expected-p test result))
+                 do (push (list :name (symbol-name (ert-test-name test))
+                                :condition (builder-emacs-conf--ert-result-condition result))
+                          failing))
+        (list :status (if (and tests (zerop (ert-stats-completed-unexpected stats))) "ok" "failed")
+              :total (ert-stats-total stats)
+              :passed (ert-stats-completed-expected stats)
+              :failed (ert-stats-completed-unexpected stats)
+              :skipped (ert-stats-skipped stats)
+              :failing (vconcat (nreverse failing))
+              :error (and (null tests) "no tests matched"))))))
 
 ;;;###autoload
 (cl-defun builder-emacs-conf-package-test-report (&optional root &key selector prefix glob)
