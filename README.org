@@ -58,6 +58,7 @@ Protocol (MCP) via [[https://github.com/tychoish/mcpkit][mcpkit]].
 | =builder-docs.el= | Org link validation and =docs/api.org= generation |
 | =builder-tasks.el= | 24 declarative candidate generator pipelines for supported tools|
 | =builder-mcp.el= | Model Context Protocol service on port 8765 via =mcpkit= |
+| =builder-elpaish.el= | =elpaish_*= MCP tools; registered only when ELPAish is installed |
 | =builder.el= | Primary package entry point, autoloads, and metadata |
 
 * Installation
@@ -164,6 +165,15 @@ Emacs Lisp packages:
   and heading anchors) in =README.org= and =docs/*.org=.
 - =doc_generate_api=: Scaffolds or regenerates =docs/api.org= with
   =org-docsgen=.
+
+ELPAish (registered only when =elpaish-ops= is installed; a separate =elpaish=
+service, ELPAish itself stays optional and is loaded on first call):
+- =elpaish_status=: per-recipe commit delta against the last build; local only,
+  never clones or fetches.
+- =elpaish_rebuild=: rebuild archives for one package, those behind HEAD, or all.
+- =elpaish_upgrade=: upgrade named or all installed packages.
+- =elpaish_workflow_dispatch=: dispatch the ELPAish repository's workflow.
+- =elpaish_recipe=: format an =elpaish-register-package= form.
 
 Worktrees named =<repo>/.wt/<topic>= are recognized as the package =<repo>=.
 

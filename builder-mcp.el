@@ -15,7 +15,8 @@
 ;; using `mcpkit', plus Elisp package tools: `elisp_preflight',
 ;; `builder_run_tests', `builder_package_build', `builder_package_unused',
 ;; `elisp_package_spinout', `elisp_ci_setup', `doc_generate_api' and
-;; `doc_validate'.
+;; `doc_validate'.  When ELPAish is installed, `builder-elpaish' adds its
+;; `elpaish_*' tools on a separate `elpaish' service.
 ;;
 ;; Tools are registered at top-level on the `'builder' service upon loading.
 ;; Services merge into the centralized `mcpkit' HTTP server (default port 8765)
@@ -497,6 +498,8 @@ JSON false arrives as `:json-false'."
                    (error "%s" err)
                  (setq result res))))
     result))
+
+(require 'builder-elpaish nil t)
 
 (provide 'builder-mcp)
 ;;; builder-mcp.el ends here
