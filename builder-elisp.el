@@ -165,14 +165,30 @@ Omitted warnings: `free-vars', `docstrings-wide'."
                           (buffer-list)))
       (builder-elisp-disable-ert-advice))))
 
+(defconst builder-elisp-package--worktree-regexp
+  "\\`\\(.+?\\)/\\(?:\\.wt\\|\\.claude/worktrees\\)/[^/]+\\'"
+  "Match a git worktree directory nested under its repository root.
+Group 1 is the repository root, whose name is the package name.")
+
 (defun builder-elisp-package--name (root)
   "Return the package name for the elisp project at ROOT.
 Strips a trailing \".el\" from the directory name so a project in
-\"xtdlib.el/\" packages as \"xtdlib\"."
-  (let ((basename (file-name-nondirectory (directory-file-name root))))
-    (if (string-suffix-p ".el" basename)
-        (string-remove-suffix ".el" basename)
-      basename)))
+\"xtdlib.el/\" packages as \"xtdlib\".  A worktree under
+\"<repo>/.wt/<topic>\" (or \"<repo>/.claude/worktrees/<topic>\") has a
+directory name unrelated to the package, so when that name has no
+matching <NAME>.el there, the repository's name is used instead."
+  (let* ((dir (directory-file-name root))
+         (basename (file-name-nondirectory dir))
+         (name (string-remove-suffix ".el" basename)))
+    (or (and (string-match builder-elisp-package--worktree-regexp dir)
+             (not (seq-some (lambda (d) (file-regular-p (f-join d (concat name ".el"))))
+                            (builder-elisp-package-directories root name)))
+             (let ((repo (string-remove-suffix
+                          ".el" (file-name-nondirectory (match-string 1 dir)))))
+               (and (seq-some (lambda (d) (file-regular-p (f-join d (concat repo ".el"))))
+                              (builder-elisp-package-directories root repo))
+                    repo)))
+        name)))
 
 (defvar builder-elisp-package-path-resolvers
   (list (lambda (root &optional _name) root)
@@ -583,6 +599,27 @@ Checks docstrings and alias order.  Returns a list of error strings."
   (append (builder-elisp-check-alias-order file-or-buffer)
           (builder-elisp-check-docstrings file-or-buffer)))
 
+(defun builder-elisp-static-findings (root sources)
+  "Return static-analysis findings for the package at ROOT.
+SOURCES is the list of source files to lint.  Each finding is a plist
+with :message, and :file (absolute) for file-level findings; workflow
+configuration findings have no :file.  This is the single implementation
+behind `builder-elisp-package-lint', `builder-elisp-package-preflight'
+and `builder-elisp-check-package'."
+  (append
+   (mapcar (lambda (msg) (list :message msg))
+           (builder-elisp-check-ci-workflows root))
+   (mapcan (lambda (src)
+             (mapcar (lambda (msg) (list :file src :message msg))
+                     (builder-elisp-lint-file src)))
+           sources)))
+
+(defun builder-elisp--finding-text (finding)
+  "Return FINDING (see `builder-elisp-static-findings') as one line of text."
+  (if-let* ((file (plist-get finding :file)))
+      (format "%s: %s" (file-name-nondirectory file) (plist-get finding :message))
+    (plist-get finding :message)))
+
 ;;;###autoload
 (defun builder-elisp-package-preflight (&optional root)
   "Run preflight validation on the package at ROOT (or project root).
@@ -593,19 +630,12 @@ Returns t if all checks pass, nil otherwise."
                (sources (builder-elisp-package--source-files pkg-root))
                (failed 0))
     (message "[builder-preflight] running preflight checks for %s..." name)
-    (let ((ci-errors (builder-elisp-check-ci-workflows pkg-root)))
-      (seq-do (lambda (err)
-                (message "[builder-preflight] [CI CONFIG ERROR] %s" err)
-                (cl-incf failed))
-              ci-errors))
-    (seq-do (lambda (src)
-              (let ((errs (builder-elisp-lint-file src)))
-                (seq-do (lambda (err)
-                          (message "[builder-preflight] [LINT ERROR] %s: %s"
-                                   (file-name-nondirectory src) err)
-                          (cl-incf failed))
-                        errs)))
-            sources)
+    (seq-do (lambda (finding)
+              (message "[builder-preflight] [%s] %s"
+                       (if (plist-get finding :file) "LINT ERROR" "CI CONFIG ERROR")
+                       (builder-elisp--finding-text finding))
+              (cl-incf failed))
+            (builder-elisp-static-findings pkg-root sources))
     (let ((byte-compile-error-on-warn t)
           (byte-compile-warnings (if (memq 'docstrings-wide (bound-and-true-p byte-compile-warning-types))
                                      (cons 'docstrings-wide builder-elisp-byte-compile-warnings)
@@ -655,19 +685,12 @@ In batch mode exits with status 1 if any file fails linting or compilation."
                (failed 0))
     (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
     ;; 1. Static and workflow checks
-    (let ((ci-errors (builder-elisp-check-ci-workflows root)))
-      (seq-do (lambda (err)
-                (message "[builder-lint] [CI ERROR]: %s" err)
-                (cl-incf failed))
-              ci-errors))
-    (seq-do (lambda (it)
-              (let ((static-errors (builder-elisp-lint-file it)))
-                (seq-do (lambda (err)
-                          (message "[builder-lint] [STATIC ERROR] %s: %s"
-                                   (file-name-nondirectory it) err)
-                          (cl-incf failed))
-                        static-errors)))
-            sources)
+    (seq-do (lambda (finding)
+              (message "[builder-lint] [%s]: %s"
+                       (if (plist-get finding :file) "STATIC ERROR" "CI ERROR")
+                       (builder-elisp--finding-text finding))
+              (cl-incf failed))
+            (builder-elisp-static-findings root sources))
     (let* ((load-path (cons root load-path))
            (byte-compile-warnings (if (memq 'docstrings-wide (bound-and-true-p byte-compile-warning-types))
                                       (cons 'docstrings-wide builder-elisp-byte-compile-warnings)

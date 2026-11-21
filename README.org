@@ -52,7 +52,10 @@ Protocol (MCP) via [[https://github.com/tychoish/mcpkit][mcpkit]].
 | =builder-core.el= | Candidate struct, registry, caching, selection, compilation driver|
 | =builder-mode.el= | Global minor mode, error regexps, ANSI colorization, keybindings |
 | =builder-elisp.el= | Path resolver registry, package reload, test, compile, lint |
-| =builder-isolate-elisp.el=| Subprocess & daemon isolation runners, clean-elc, native compile |
+| =builder-isolate-elisp.el=| Subprocess & daemon isolation runners, fast package test runner, clean-elc, native compile |
+| =builder-elisp-check.el= | Structured, cached package checks (parens, compile, checkdoc, package-lint, relint, static) |
+| =builder-scaffold.el= | Package repository and CI workflow scaffolding |
+| =builder-docs.el= | Org link validation and =docs/api.org= generation |
 | =builder-tasks.el= | 24 declarative candidate generator pipelines for supported tools|
 | =builder-mcp.el= | Model Context Protocol service on port 8765 via =mcpkit= |
 | =builder.el= | Primary package entry point, autoloads, and metadata |
@@ -127,11 +130,42 @@ Register custom package path resolvers for non-standard project layouts:
 
 ** MCP Tools
 When =mcpkit= is loaded, =builder-mcp= registers the ='builder= service exposing:
+
+Task running:
 - =discover_tasks=: Returns discovered candidate tasks as JSON plists.
 - =run_task=: Spawns a non-interactive compilation process in a named buffer.
 - =read_buffer=: Reads lines, exit status, line count, and tail output.
 - =await_build=: Asynchronously waits for process termination with timeout.
 - =list_buffers=: Lists all active compilation buffers.
+
+Emacs Lisp packages:
+- =elisp_preflight=: One in-process call running check-parens, byte-compile,
+  checkdoc, package-lint, relint (when installed) and builder's static checks.
+  Returns structured findings (tool, file, line, severity, message).  Findings
+  are cached per file, so a re-run after an edit only re-checks what changed;
+  pass =cache= false to force, or =isolated= true for a fresh subprocess.
+- =builder_run_tests=: With a =root=, loads the package and runs its ERT tests
+  in a fast isolated subprocess (no =package-initialize=) and returns counts
+  plus each failing test and its condition.  =selector= (regexp), =prefix= and
+  =glob= narrow the run.  Without a root it runs an ERT selector form in the
+  live Emacs.
+- =builder_package_build=: Builds an installable =.tar= into =build/packages/=
+  (=action= =build=), cleans artifacts (=clean=), or both (=rebuild=).
+- =builder_package_unused=: Lists installed packages outside the dependency
+  closure of your selected packages.
+- =builder_byte_compile=, =builder_check_parens=, =builder_load_file=:
+  single-file checks (byte-compile and load run in an isolated subprocess).
+- =elisp_package_spinout= and =elisp_ci_setup=: Scaffold a package repository
+  and a GitHub Actions workflow.  Both default to =dry_run=; neither runs git
+  or touches the network, and existing files are never overwritten (a workflow
+  is replaced only with =overwrite=).  Author, GitHub owner, CI action
+  repository and Emacs versions are customizable under =builder-scaffold=.
+- =doc_validate=: Checks Org links (file targets, line numbers, =CUSTOM_ID=
+  and heading anchors) in =README.org= and =docs/*.org=.
+- =doc_generate_api=: Scaffolds or regenerates =docs/api.org= with
+  =org-docsgen=.
+
+Worktrees named =<repo>/.wt/<topic>= are recognized as the package =<repo>=.
 
 * License
 :PROPERTIES:

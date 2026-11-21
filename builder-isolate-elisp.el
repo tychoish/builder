@@ -274,6 +274,112 @@ if the child never wrote a result -- e.g. FORM signaled outside its own
       (when (file-exists-p result-file)
         (delete-file result-file)))))
 
+;;;; Fast subprocess transport -- no `package-initialize'
+
+(defun builder-emacs-conf--emacs-program ()
+  "Return the path of the running Emacs executable, or \"emacs\"."
+  (let ((exe (expand-file-name invocation-name invocation-directory)))
+    (if (file-executable-p exe) exe "emacs")))
+
+(defun builder-emacs-conf--fast-batch-eval (form)
+  "Evaluate FORM in a minimal `emacs -Q --batch' subprocess; return its value.
+Unlike `builder-emacs-conf--isolated-batch-eval', the child does not run
+`package-initialize' (about 0.5s of startup): it is handed this session's
+`load-path' instead, so every installed package can be required but none
+is activated.  `builder-isolate-elisp' is loaded first, so FORM may call
+the `builder-emacs-conf--do-*' functions.  The value crosses via a scratch
+file; if the child never wrote one, return (:status \"error\" :error OUTPUT)."
+  (let* ((result-file (make-temp-file "builder-fast-result-"))
+         (buf (generate-new-buffer " *builder-fast-batch*")))
+    (unwind-protect
+        (progn
+          (call-process (builder-emacs-conf--emacs-program) nil buf nil
+                        "--batch" "-Q"
+                        "--eval" (format "(setq load-path '%S)" load-path)
+                        "--eval" "(require 'builder-isolate-elisp)"
+                        "--eval" (format "(with-temp-file %S (prin1 %S (current-buffer)))"
+                                         result-file form))
+          (if (> (file-attribute-size (file-attributes result-file)) 0)
+              (with-temp-buffer
+                (insert-file-contents result-file)
+                (read (current-buffer)))
+            (list :status "error"
+                  :error (with-current-buffer buf (string-trim (buffer-string))))))
+      (kill-buffer buf)
+      (when (file-exists-p result-file)
+        (delete-file result-file)))))
+
+(defun builder-emacs-conf--ert-result-condition (result)
+  "Return a short string describing why ERT RESULT did not pass."
+  (let ((text (if (ert-test-result-with-condition-p result)
+                  (format "%S" (ert-test-result-with-condition-condition result))
+                (format "%s" (type-of result)))))
+    (if (> (length text) 400) (concat (substring text 0 400) "...") text)))
+
+(defun builder-emacs-conf--do-package-test-report (root selector prefix glob)
+  "Run ERT tests for the elisp package at ROOT and return a result plist.
+Loads the package as `builder-emacs-conf--do-elisp-package-test-check'
+does, then runs only the tests those files defined, narrowed by SELECTOR
+\(a regexp), PREFIX (a name prefix) and GLOB (a wildcard pattern) when
+non-nil.  Returns :status, :total, :passed, :failed, :skipped and
+:failing (a vector of plists with :name and :condition).  Never signals."
+  (condition-case err
+      (progn
+        (require 'ert)
+        (pcase-let ((`(,root ,_name ,main-file) (builder-elisp-package--resolve root 'error)))
+          (builder-elisp-package--require-deps (builder-elisp-package--read-deps root))
+          (let* ((test-dir (f-join root "test"))
+                 (load-path (append (seq-filter #'identity
+                                                (list root (and (file-directory-p test-dir) test-dir)))
+                                    load-path))
+                 (known-before (ert-select-tests t t))
+                 (glob-re (and glob (wildcard-to-regexp glob))))
+            (load main-file nil t)
+            (seq-do (lambda (it) (unless (f-equal-p it main-file) (load it nil t)))
+                    (builder-elisp-package--source-files root))
+            (seq-do (lambda (it) (load it nil t)) (builder-elisp-package--test-files root))
+            (let* ((tests (seq-filter
+                           (lambda (test)
+                             (let ((name (symbol-name (ert-test-name test))))
+                               (and (or (null selector) (string-match-p selector name))
+                                    (or (null prefix) (string-prefix-p prefix name))
+                                    (or (null glob-re) (string-match-p glob-re name)))))
+                           (seq-difference (ert-select-tests t t) known-before)))
+                   (stats (ert-run-tests (cons 'member tests) #'ignore))
+                   (failing nil))
+              (cl-loop for test across (ert--stats-tests stats)
+                       for result across (ert--stats-test-results stats)
+                       unless (or (null result) (ert-test-result-expected-p test result))
+                       do (push (list :name (symbol-name (ert-test-name test))
+                                      :condition (builder-emacs-conf--ert-result-condition result))
+                                failing))
+              (list :status (if (and tests (zerop (ert-stats-completed-unexpected stats))) "ok" "failed")
+                    :total (ert-stats-total stats)
+                    :passed (ert-stats-completed-expected stats)
+                    :failed (ert-stats-completed-unexpected stats)
+                    :skipped (ert-stats-skipped stats)
+                    :failing (vconcat (nreverse failing))
+                    :error (and (null tests) "no tests matched"))))))
+    (error (list :status "error" :error (error-message-string err)))))
+
+;;;###autoload
+(cl-defun builder-emacs-conf-package-test-report (&optional root &key selector prefix glob)
+  "Run the elisp package at ROOT's ERT tests in a fast subprocess.
+Returns a plist: :status (\"ok\", \"failed\" or \"error\"), :root,
+:total, :passed, :failed, :skipped, :failing (vector of :name and
+:condition plists), :error and :elapsed_ms.  SELECTOR is a test-name
+regexp, PREFIX a name prefix and GLOB a wildcard pattern; all narrow the
+run.  ROOT defaults to `approximate-project-root'.  The child starts
+without `package-initialize', see `builder-emacs-conf--fast-batch-eval'."
+  (let* ((root (file-name-as-directory
+                (expand-file-name (or root (approximate-project-root)))))
+         (start (float-time))
+         (result (builder-emacs-conf--fast-batch-eval
+                  (list 'builder-emacs-conf--do-package-test-report
+                        root selector prefix glob))))
+    (append (list :root root) result
+            (list :elapsed_ms (round (* 1000 (- (float-time) start)))))))
+
 ;;;###autoload
 (defun builder-emacs-conf-async-byte-compile-check (&optional file)
   "Byte-compile FILE in an isolated subprocess without blocking Emacs.

@@ -51,6 +51,11 @@
 ;;;###autoload (autoload 'builder-run-ert-tests-with-glob "builder-elisp" "Run ERT tests matching glob pattern." t)
 ;;;###autoload (autoload 'builder-isolated-check "builder-isolate-elisp" "Run isolated subprocess or daemon check." nil)
 ;;;###autoload (autoload 'builder-mcp-start "builder-mcp" "Start or merge the builder MCP service into mcpkit." t)
+;;;###autoload (autoload 'builder-elisp-check-package "builder-elisp-check" "Check an Elisp package and return structured findings." nil)
+;;;###autoload (autoload 'builder-scaffold-package "builder-scaffold" "Scaffold an Elisp package repository." nil)
+;;;###autoload (autoload 'builder-scaffold-ci "builder-scaffold" "Generate a CI workflow for an Elisp package." nil)
+;;;###autoload (autoload 'builder-docs-validate "builder-docs" "Validate Org links in a package's documentation." nil)
+;;;###autoload (autoload 'builder-docs-generate-api "builder-docs" "Scaffold or regenerate docs/api.org." nil)
 
 (provide 'builder)
 ;;; builder.el ends here

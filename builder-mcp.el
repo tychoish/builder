@@ -12,7 +12,10 @@
 ;;
 ;; Exposes builder task discovery, compilation execution, output buffer
 ;; retrieval, and asynchronous process awaiting over Model Context Protocol (MCP)
-;; using `mcpkit'.
+;; using `mcpkit', plus Elisp package tools: `elisp_preflight',
+;; `builder_run_tests', `builder_package_build', `builder_package_unused',
+;; `elisp_package_spinout', `elisp_ci_setup', `doc_generate_api' and
+;; `doc_validate'.
 ;;
 ;; Tools are registered at top-level on the `'builder' service upon loading.
 ;; Services merge into the centralized `mcpkit' HTTP server (default port 8765)
@@ -27,6 +30,13 @@
 (require 'mcpkit)
 (require 'builder-core)
 (require 'builder-isolate-elisp)
+
+(defvar builder-elisp-check-use-cache)
+(declare-function builder-elisp-check-package "builder-elisp-check")
+(declare-function builder-scaffold-package "builder-scaffold")
+(declare-function builder-scaffold-ci "builder-scaffold")
+(declare-function builder-docs-validate "builder-docs")
+(declare-function builder-docs-generate-api "builder-docs")
 
 (defgroup builder-mcp nil
   "Model Context Protocol service for builder."
@@ -220,33 +230,39 @@
 ;; Tool 7: builder_check_parens (alias: check_parens)
 
 (mcpkit-register-tool 'builder_check_parens 'builder
-  :description "Check parenthesis balance in an Elisp file or buffer using check-parens."
+  :description "Check parenthesis balance in an Elisp file or buffer using check-parens. Files are checked in a scratch buffer, not visited."
   :input-schema '(:type "object"
                   :properties (:file (:type "string" :description "Path to Elisp file")
                                :buffer_name (:type "string" :description "Buffer name to check"))
                   :required [])
   (let* ((file (plist-get args :file))
          (buf-name (plist-get args :buffer_name))
-         (target-buf (or (and buf-name (get-buffer buf-name))
-                         (and file (find-file-noselect file)))))
-    (unless target-buf
+         (live (and buf-name (get-buffer buf-name))))
+    (unless (or live (and file (file-readable-p file)))
       (user-error "Must specify an existing file or buffer_name"))
-    (with-current-buffer target-buf
-      (condition-case err
-          (save-excursion
-            (save-restriction
-              (widen)
-              (goto-char (point-min))
-              (check-parens)
-              (list :status "ok" :balanced t :file file :buffer_name (buffer-name target-buf))))
-        (error
-         (list :status "error"
-               :balanced :json-false
-               :file file
-               :buffer_name (buffer-name target-buf)
-               :line (line-number-at-pos)
-               :column (current-column)
-               :error (error-message-string err)))))))
+    (let ((check (lambda ()
+                   (condition-case err
+                       (save-excursion
+                         (save-restriction
+                           (widen)
+                           (goto-char (point-min))
+                           (check-parens)
+                           (list :status "ok" :balanced t :file file
+                                 :buffer_name (and live (buffer-name live)))))
+                     (error
+                      (list :status "error"
+                            :balanced :json-false
+                            :file file
+                            :buffer_name (and live (buffer-name live))
+                            :line (line-number-at-pos)
+                            :column (current-column)
+                            :error (error-message-string err)))))))
+      (if live
+          (with-current-buffer live (funcall check))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (delay-mode-hooks (emacs-lisp-mode))
+          (funcall check))))))
 
 (when (fboundp (quote mcpkit-register-tool-alias))
   (mcpkit-register-tool-alias "check_parens" "builder_check_parens"))
@@ -255,18 +271,23 @@
 ;; Tool 8: builder_run_tests / run_tests
 
 (mcpkit-register-tool 'builder_run_tests 'builder
-  :description "Run ERT tests for an Elisp package at ROOT or with an ERT selector."
+  :description "Run ERT tests. With `root' (alias `directory'), load that package and run its tests in a fast isolated subprocess, returning structured results: status, total, passed, failed, skipped and the failing tests with their conditions. `selector' is then a test-name regexp; `prefix' and `glob' narrow it further. Without a root, run an ERT selector form in the live Emacs."
   :input-schema '(:type "object"
-                  :properties (:root (:type "string" :description "Optional package directory to test in isolated subprocess")
-                               :selector (:type "string" :description "Optional ERT selector regexp"))
+                  :properties (:root (:type "string" :description "Package directory to test in an isolated subprocess")
+                               :directory (:type "string" :description "Alias for root")
+                               :selector (:type "string" :description "With root: test-name regexp. Without: ERT selector form")
+                               :prefix (:type "string" :description "Only tests whose name starts with this (root only)")
+                               :glob (:type "string" :description "Only tests whose name matches this wildcard (root only)"))
                   :required [])
-  (let* ((root (plist-get args :root))
+  (let* ((root (or (plist-get args :root) (plist-get args :directory)))
          (selector (plist-get args :selector)))
     (if (and root (not (string-empty-p root)))
-        (let* ((ok (builder-emacs-conf-elisp-package-test-isolated root))
-               (log (with-current-buffer (get-buffer-create "*builder-test-check-log*")
-                      (buffer-substring-no-properties (point-min) (point-max)))))
-          (list :root root :status (if ok "ok" "error") :success (if ok t :json-false) :log log))
+        (let ((report (builder-emacs-conf-package-test-report
+                       root :selector selector
+                       :prefix (plist-get args :prefix)
+                       :glob (plist-get args :glob))))
+          (append (list :success (if (equal (plist-get report :status) "ok") t :json-false))
+                  report))
       (let* ((sel (if selector (read selector) t))
              (stats (ert sel))
              (total (ert-stats-total stats))
@@ -301,6 +322,155 @@
 
 (when (fboundp (quote mcpkit-register-tool-alias))
   (mcpkit-register-tool-alias "load_file" "builder_load_file"))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Elisp package tools: preflight, build, scaffold, docs
+
+(defun builder-mcp--list (value)
+  "Return JSON array VALUE (vector or list) as a list, or nil."
+  (cond ((vectorp value) (append value nil))
+        ((listp value) value)))
+
+(defun builder-mcp--flag (args key default)
+  "Return the boolean ARGS value for KEY, or DEFAULT when absent.
+JSON false arrives as `:json-false'."
+  (let ((value (plist-get args key)))
+    (cond ((eq value :json-false) nil)
+          ((null value) default)
+          (t t))))
+
+(defun builder-mcp--directory (args)
+  "Return the :directory in ARGS, or `default-directory'."
+  (let ((dir (plist-get args :directory)))
+    (if (and (stringp dir) (not (string-empty-p dir))) dir default-directory)))
+
+(defun builder-mcp--required-directory (args)
+  "Return the required :directory in ARGS."
+  (let ((dir (plist-get args :directory)))
+    (unless (and (stringp dir) (not (string-empty-p dir)))
+      (user-error "Directory is required"))
+    dir))
+
+(mcpkit-register-tool 'elisp_preflight 'builder
+  :description "Lint an Elisp package in one in-process call: check-parens, byte-compile, checkdoc, package-lint and relint (when installed), plus builder static checks. Returns structured findings (file, line, severity, message, tool); line 0 means unknown. Only errors fail the run; tools not installed are listed under skipped. Results are cached per file, so re-running after an edit is fast (`cached' counts answered checks; pass cache=false to force). isolated=true runs it in a fresh subprocess instead (slower, immune to this session's state)."
+  :input-schema '(:type "object"
+                  :properties (:directory (:type "string" :description "Package root (defaults to the daemon's default-directory)")
+                               :files (:type "array" :items (:type "string")
+                                       :description "Files to check instead of the discovered sources (relative to directory)")
+                               :tools (:type "array"
+                                       :items (:type "string"
+                                               :enum ["parens" "compile" "checkdoc" "package-lint" "relint" "static"])
+                                       :description "Subset of checks to run (default all)")
+                               :cache (:type "boolean" :description "Reuse findings for unchanged files (default true)")
+                               :isolated (:type "boolean" :description "Run in a fresh emacs subprocess (default false)"))
+                  :required [])
+  (require 'builder-elisp-check)
+  (let ((dir (builder-mcp--directory args))
+        (files (builder-mcp--list (plist-get args :files)))
+        (tools (mapcar #'intern (builder-mcp--list (plist-get args :tools)))))
+    (if (builder-mcp--flag args :isolated nil)
+        (builder-emacs-conf--fast-batch-eval
+         `(progn (require 'builder-elisp-check)
+                 (let ((builder-elisp-check-use-cache nil))
+                   (builder-elisp-check-package ,dir :files ',files :tools ',tools))))
+      (let ((builder-elisp-check-use-cache (builder-mcp--flag args :cache t)))
+        (builder-elisp-check-package dir :files files :tools tools)))))
+
+(mcpkit-register-tool 'builder_package_build 'builder
+  :description "Build an installable .tar for an Elisp package into build/packages/ (from git HEAD; uncommitted changes are not included), or clean build artifacts (build/, .cache/, *.elc). action is build (default), clean or rebuild."
+  :input-schema '(:type "object"
+                  :properties (:directory (:type "string" :description "Package root (defaults to the daemon's default-directory)")
+                               :action (:type "string" :enum ["build" "clean" "rebuild"]
+                                        :description "build (default), clean, or clean then build"))
+                  :required [])
+  (let* ((default-directory (file-name-as-directory
+                             (expand-file-name (builder-mcp--directory args))))
+         (action (or (plist-get args :action) "build"))
+         (noninteractive nil)
+         artifact)
+    (unless (member action '("build" "clean" "rebuild"))
+      (user-error "Unknown action: %s" action))
+    (when (member action '("clean" "rebuild"))
+      (builder-elisp-package-clean))
+    (when (member action '("build" "rebuild"))
+      (builder-elisp-package-build)
+      (setq artifact (car (seq-sort-by (lambda (f) (float-time (file-attribute-modification-time
+                                                                  (file-attributes f))))
+                                       #'> (file-expand-wildcards
+                                            (expand-file-name "build/packages/*.tar")))))
+      (unless artifact (user-error "Build produced no archive")))
+    (list :status "ok" :action action :directory default-directory :artifact artifact)))
+
+(mcpkit-register-tool 'builder_package_unused 'builder
+  :description "Audit packages installed under package-user-dir that are not in the dependency closure of package-selected-packages and the use-package declarations in init files."
+  :input-schema '(:type "object" :properties () :required [])
+  (ignore args)
+  (let ((unused (builder-package-unused package-selected-packages)))
+    (list :status "ok"
+          :unused_count (length unused)
+          :unused_packages (vconcat (mapcar #'symbol-name unused)))))
+
+(mcpkit-register-tool 'elisp_package_spinout 'builder
+  :description "Scaffold a standalone package repository (.gitignore, starter <pkg>.el, starter test, CI workflow). Local file writes only: no git, no network. Existing files are never overwritten. dry_run defaults to true; pass dry_run=false to write."
+  :input-schema '(:type "object"
+                  :properties (:package (:type "string" :description "Package name")
+                               :target_dir (:type "string" :description "Repository directory (default ~/src/<package>)")
+                               :summary (:type "string" :description "One-line package description")
+                               :url (:type "string" :description "Homepage URL")
+                               :dependencies (:type "array" :items (:type "string")
+                                              :description "Packages the CI workflow must install")
+                               :dry_run (:type "boolean" :description "Report without writing (default true)"))
+                  :required ["package"])
+  (require 'builder-scaffold)
+  (let ((pkg (plist-get args :package)))
+    (unless (and (stringp pkg) (not (string-empty-p pkg)))
+      (user-error "Package is required"))
+    (builder-scaffold-package pkg
+                              :directory (plist-get args :target_dir)
+                              :summary (plist-get args :summary)
+                              :url (plist-get args :url)
+                              :dependencies (builder-mcp--list (plist-get args :dependencies))
+                              :dry-run (builder-mcp--flag args :dry_run t))))
+
+(mcpkit-register-tool 'elisp_ci_setup 'builder
+  :description "Generate .github/workflows/ci.yml using composite actions (Emacs matrix, lint, ERT, coverage, Codecov). Dependencies default to the Package-Requires headers. Returns the generated workflow; an existing workflow is only replaced with overwrite=true. dry_run defaults to true; pass dry_run=false to write."
+  :input-schema '(:type "object"
+                  :properties (:directory (:type "string" :description "Package directory")
+                               :dependencies (:type "array" :items (:type "string")
+                                              :description "Override the inferred dependency list")
+                               :with_lint (:type "boolean" :description "Include the lint step (default true)")
+                               :with_coverage (:type "boolean" :description "Include coverage (default true)")
+                               :with_codecov (:type "boolean" :description "Include the Codecov upload (default true)")
+                               :overwrite (:type "boolean" :description "Replace an existing ci.yml")
+                               :dry_run (:type "boolean" :description "Report without writing (default true)"))
+                  :required ["directory"])
+  (require 'builder-scaffold)
+  (builder-scaffold-ci
+   (builder-mcp--required-directory args)
+   :dependencies (builder-mcp--list (plist-get args :dependencies))
+   :with-lint (builder-mcp--flag args :with_lint t)
+   :with-coverage (builder-mcp--flag args :with_coverage t)
+   :with-codecov (builder-mcp--flag args :with_codecov t)
+   :overwrite (builder-mcp--flag args :overwrite nil)
+   :dry-run (builder-mcp--flag args :dry_run t)))
+
+(mcpkit-register-tool 'doc_generate_api 'builder
+  :description "Scaffold (when missing) or regenerate docs/api.org for a package with org-docsgen. dry_run reports the action without running it."
+  :input-schema '(:type "object"
+                  :properties (:directory (:type "string" :description "Package directory")
+                               :dry_run (:type "boolean" :description "Report the action without running it"))
+                  :required ["directory"])
+  (require 'builder-docs)
+  (builder-docs-generate-api (builder-mcp--required-directory args)
+                             (builder-mcp--flag args :dry_run nil)))
+
+(mcpkit-register-tool 'doc_validate 'builder
+  :description "Validate Org links (files, line numbers, CUSTOM_IDs, headings, internal anchors) in a package's *.org and docs/*.org. Returns errors with file, line and message."
+  :input-schema '(:type "object"
+                  :properties (:directory (:type "string" :description "Package directory"))
+                  :required ["directory"])
+  (require 'builder-docs)
+  (builder-docs-validate (builder-mcp--required-directory args)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lifecycle & Orchestration
