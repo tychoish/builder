@@ -265,6 +265,8 @@ if the child never wrote a result -- e.g. FORM signaled outside its own
           (apply #'call-process "emacs" nil buf nil
                  (append (list "--batch" "-L" (expand-file-name "lisp" user-emacs-directory))
                          (when builder-dir (list "-L" builder-dir))
+                         (when (and (boundp 'package-user-dir) package-user-dir)
+                           (list "--eval" (format "(setq package-user-dir %S)" (expand-file-name package-user-dir))))
                          (list "-f" "package-initialize" "--eval" "(require 'builder)"
                                "--eval" (format "(with-temp-file %S (prin1 %S (current-buffer)))"
                                                result-file form))))
@@ -414,6 +416,8 @@ displaying that buffer on failure."
                  (display-buffer "*Compile-Log*"))))
            (append (list "--batch" "-L" (expand-file-name "lisp" user-emacs-directory))
                    (when builder-dir (list "-L" builder-dir))
+                   (when (and (boundp 'package-user-dir) package-user-dir)
+                     (list "--eval" (format "(setq package-user-dir %S)" (expand-file-name package-user-dir))))
                    (list "-f" "package-initialize" "--eval" "(require 'builder)"
                          "--eval" (format "(with-temp-file %S (prin1 (builder-emacs-conf--do-byte-compile-check %S) (current-buffer)))"
                                           result-file expanded))))))
