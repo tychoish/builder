@@ -1021,6 +1021,12 @@ Calls `builder-org-babel-execute-file' on each file found by
         :name "ci-docker-tests"
         :command "emacsclient --eval '(builder-run-ci-tests-docker)'"
         :directory root
+       (make-builder-candidate
+        :name "startup-profile"
+        :command "emacsclient --timeout 10 --eval '(builder-emacs-conf-startup-profile)'"
+        :directory root
+        :priority 0
+        :annotation "profile init in a throwaway daemon (async; report in *builder-startup-profile*)")
         :priority 0
         :annotation "run CI test suite in silex/emacs:30.2-ci docker container"))))
 

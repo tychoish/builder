@@ -21,6 +21,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'cl-lib)
+(require 'loadhist)
 (require 'f)
 (require 'builder-core)
 (require 'builder-elisp)
@@ -421,6 +422,146 @@ displaying that buffer on failure."
                    (list "-f" "package-initialize" "--eval" "(require 'builder)"
                          "--eval" (format "(with-temp-file %S (prin1 (builder-emacs-conf--do-byte-compile-check %S) (current-buffer)))"
                                           result-file expanded))))))
+
+;;;; startup profiling -- throwaway daemon, never the live one
+
+(defcustom builder-startup-profile-wait 10
+  "Seconds `builder-emacs-conf-startup-profile' lets a probe daemon settle."
+  :type 'number
+  :group 'builder-isolate-elisp)
+
+(defconst builder-emacs-conf--startup-profile-buffer "*builder-startup-profile*"
+  "Buffer holding the latest startup profile or trace report.")
+
+(defun builder-emacs-conf--feature-file-table ()
+  "Return an alist of (FEATURE . FILE) for each loaded feature with a known file."
+  (thread-last (seq-uniq features)
+               (seq-keep (lambda (feature)
+                           (when-let* ((file (feature-file feature)))
+                             (cons (symbol-name feature) file))))
+               (seq-sort-by #'car #'string<)))
+
+(defun builder-emacs-conf--startup-profile-report (messages)
+  "Format startup timings found in the *Messages* text MESSAGES.
+Lists the \"[emacs]\" summary lines, then the 15 slowest \"[op]\" timings
+\(emitted when Emacs starts with `--with-slow-op-timing')."
+  (let (summary ops)
+    (seq-do (lambda (line)
+              (cond
+               ((string-match "\\`\\[emacs\\]: <[^>]*> \\(.*\\)\\'" line)
+                (push (match-string 1 line) summary))
+               ((string-match "\\`\\[op\\]: \\(.*\\): \\([0-9.]+\\)s\\'" line)
+                (push (cons (string-to-number (match-string 2 line))
+                            (match-string 1 line))
+                      ops))))
+            (split-string messages "\n" t))
+    (concat "== init / user / wall ==\n"
+            (string-join (nreverse summary) "\n")
+            "\n\n== slowest operations (seconds) ==\n"
+            (string-join
+             (seq-map (lambda (op) (format "%.6f  %s" (car op) (cdr op)))
+                      (seq-take (seq-sort-by #'car #'> ops) 15))
+             "\n"))))
+
+(defun builder-emacs-conf--startup-profile-finish (buffer-name text callback)
+  "Show TEXT in BUFFER-NAME, alert, and call CALLBACK with TEXT."
+  (builder-emacs-conf--report-log buffer-name text)
+  (alert "startup profile ready" :title "builder-emacs-conf-startup-profile")
+  (display-buffer buffer-name)
+  (when callback
+    (funcall callback text)))
+
+(cl-defun builder-emacs-conf-startup-profile (&key (wait builder-startup-profile-wait) callback)
+  "Profile startup in a throwaway daemon without blocking Emacs.
+Starts `emacs --fg-daemon' under its own `--id' and `--with-slow-op-timing',
+waits WAIT seconds, reads its *Messages*, and shuts it down through its own
+server file.  The report lands in `builder-emacs-conf--startup-profile-buffer'
+and is passed to CALLBACK.  Never touches the running daemon."
+  (interactive)
+  (require 'server)
+  (let* ((id (format "startup-profile-%d" (random 1000000)))
+         (server-file (expand-file-name id server-auth-dir))
+         (default-directory (expand-file-name user-emacs-directory))
+         (buffer-name builder-emacs-conf--startup-profile-buffer))
+    (builder-emacs-conf--report-log buffer-name (format "profiling startup (%s), ~%ss...\n" id wait))
+    (make-process :name id :noquery t :buffer nil
+                  :command (list (builder-emacs-conf--emacs-program)
+                                 (concat "--fg-daemon=" id) "--id" id "--with-slow-op-timing"))
+    (run-with-timer
+     wait nil
+     (lambda ()
+       (let ((output (generate-new-buffer " *startup-profile-messages*")))
+         (make-process
+          :name "startup-profile-collect" :noquery t :buffer output
+          :command (list "emacsclient" "-f" server-file "--timeout" "10" "--eval"
+                         "(with-current-buffer \"*Messages*\" (buffer-string))")
+          :sentinel
+          (lambda (proc _event)
+            (when (memq (process-status proc) '(exit signal))
+              (let ((text (with-current-buffer output (string-trim (buffer-string)))))
+                (kill-buffer output)
+                (make-process :name "startup-profile-shutdown" :noquery t :buffer nil
+                              :command (list "emacsclient" "-f" server-file "--timeout" "10"
+                                             "--eval" "(kill-emacs)")
+                              :sentinel (lambda (_p _e)
+                                          (when (file-exists-p server-file)
+                                            (delete-file server-file))))
+                (builder-emacs-conf--startup-profile-finish
+                 buffer-name
+                 (if (string-prefix-p "\"" text)
+                     (builder-emacs-conf--startup-profile-report (read text))
+                   (format "no messages from probe daemon:\n%s" text))
+                 callback))))))))
+    id))
+
+(cl-defun builder-emacs-conf-startup-trace (feature &key callback)
+  "Report what first provides FEATURE while loading init, without blocking.
+Runs init in a throwaway `emacs --batch' and captures the backtrace at the
+moment FEATURE becomes available; reports when it is never provided (i.e. it
+is properly deferred).  FEATURE is a symbol or string.  CALLBACK, if
+non-nil, is called with the report text.  Interactively, pick it
+from the loaded features, each annotated with the file that provides it."
+  (interactive
+   (list (intern (annotated-completing-read
+                  (builder-emacs-conf--feature-file-table)
+                  :prompt "trace feature:"
+                  :category 'symbol))))
+  (let* ((feature (if (symbolp feature) feature (intern feature)))
+         (script (make-temp-file "builder-startup-trace-" nil ".el"))
+         (output (generate-new-buffer " *startup-trace*"))
+         (default-directory (expand-file-name user-emacs-directory))
+         (buffer-name builder-emacs-conf--startup-profile-buffer))
+    (with-temp-file script
+      (insert (format ";;; -*- lexical-binding: t; -*-
+\(defvar startup-trace--done nil)
+\(defun startup-trace--check (&rest _)
+  (when (and (not startup-trace--done) (featurep '%s))
+    (setq startup-trace--done t)
+    (message \"FIRST PROVIDED: %s\\n%%s\" (with-output-to-string (backtrace)))))
+\(add-hook 'after-load-functions #'startup-trace--check)
+" feature feature)))
+    (make-process
+     :name "startup-trace" :noquery t :buffer output
+     :command (list (builder-emacs-conf--emacs-program) "--batch" "-l" script
+                    "-l" "early-init.el" "-l" "init.el" "--eval" "(message \"done\")")
+     :sentinel
+     (lambda (proc _event)
+       (when (memq (process-status proc) '(exit signal))
+         (let ((text (with-current-buffer output (buffer-string))))
+           (kill-buffer output)
+           (delete-file script)
+           (builder-emacs-conf--startup-profile-finish
+            buffer-name
+            (if (string-match "FIRST PROVIDED" text)
+                (string-join
+                 (thread-last (substring text (match-beginning 0))
+                              (string-lines)
+                              (seq-take-while (lambda (l) (not (string= l "done"))))
+                              (seq-remove (lambda (l) (string-match-p "backtrace\\|standard-output\\|startup-trace--check\\|do-after-load-evaluation" l)))
+                              (seq-map (lambda (l) (truncate-string-to-width l 200))))
+                 "\n")
+              (format "%s was not provided during init (good: it is deferred)" feature))
+            callback)))))))
 
 ;;;; sprite transport -- persistent daemon, reached over sprite-direct
 

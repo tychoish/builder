@@ -405,5 +405,27 @@
                               :status)
                    "failed")))))
 
+(ert-deftest builder-startup-profile-report-test ()
+  "The report lists summary lines and the slowest ops, slowest first."
+  (require 'builder-isolate-elisp)
+  (let ((report (builder-emacs-conf--startup-profile-report
+                 (string-join '("[op]: <sprite> [startup] fast: 0.001000s"
+                                "[op]: <sprite> [startup] slow: 0.075000s"
+                                "[emacs]: <probe> init time 0.03"
+                                "unrelated message")
+                              "\n"))))
+    (should (string-match-p "init time 0.03" report))
+    (should (< (string-match "slow:\\|\\[startup\\] slow" report)
+               (string-match "\\[startup\\] fast" report)))
+    (should-not (string-match-p "unrelated" report))))
+
+(ert-deftest builder-feature-file-table-test ()
+  "Each entry maps a loaded feature's name to its providing file."
+  (require 'builder-isolate-elisp)
+  (let ((table (builder-emacs-conf--feature-file-table)))
+    (should (stringp (map-elt table "builder-core")))
+    (should (string-match-p "builder-core" (map-elt table "builder-core")))
+    (should (equal (seq-map #'car table) (sort (seq-map #'car table) #'string<)))))
+
 (provide 'test-builder-elisp-tools)
 ;;; test-builder-elisp-tools.el ends here
