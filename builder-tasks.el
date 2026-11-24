@@ -3,7 +3,6 @@
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (f "0.20.0") (xtdlib "0.1.0"))
 ;; Keywords: tools, compilation
 
 ;; This file is not part of GNU Emacs.
@@ -27,6 +26,9 @@
 (require 'xtd-s)
 (require 'eglot-test-at-point nil t)
 (declare-function eglot-test-at-point--go-names-in-buffer "eglot-test-at-point")
+(declare-function org-babel-execute-buffer "ob-core")
+(declare-function org-agenda-files "org")
+(defvar org-confirm-babel-evaluate)
 (require 'builder-core)
 (require 'builder-elisp)
 (require 'builder-isolate-elisp)
@@ -250,7 +252,8 @@ Looks for `go.work` first, then `go.mod`."
 
 ;;;###autoload
 (defun builder-go-coverage-and-convert (&optional target directory)
-  "Run `go test` with coverage and convert the profile to lcov.info via `gcov2lcov`.
+  "Run `go test' with coverage and convert the profile to lcov.info.
+Conversion uses `gcov2lcov'.
 TARGET specifies the package pattern to test (defaults to \"./...\").
 DIRECTORY is the directory from which to run tests (defaults to
 `default-directory`).
@@ -274,7 +277,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
     (unless (executable-find "go")
       (user-error "Could not find 'go' executable in PATH"))
     (unless (executable-find "gcov2lcov")
-      (user-error "gcov2lcov executable not found. Install it with: go install github.com/jandelgado/gcov2lcov@latest"))
+      (user-error "The gcov2lcov executable was not found.  Install it with: go install github.com/jandelgado/gcov2lcov@latest"))
     (let* ((root-dir (file-name-as-directory (expand-file-name root)))
            (effective-dir (cond
                            ((equal target "project root (./...)") root-dir)
@@ -682,6 +685,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
 		    candidates))))
 	     (f-directories-containing-file-justfile directories)))
 (cl-defun builder--vale-insert-statistics (buffer _message &key filename)
+  "Insert vale statistics for FILENAME into BUFFER."
   (interactive)
   (let* ((table (json-parse-string (shell-command-to-string (format "vale ls-metrics --output=line %s" filename)))))
     (with-current-buffer buffer
@@ -774,7 +778,7 @@ Signals `user-error` if not in a Go module/project or if `go` or
 
 (defun builder--org-babel-select-file ()
   "Prompt for an org file to execute.
-Candidates are open org-mode buffers first, then `org-agenda-files'.
+Candidates are open `org-mode' buffers first, then `org-agenda-files'.
 Falls back to `read-file-name' when the candidate list is empty."
   (let* ((open-org (thread-last (buffer-list)
                      (seq-filter (lambda (b)
@@ -1018,15 +1022,15 @@ Calls `builder-org-babel-execute-file' on each file found by
         :priority 0
         :annotation "delete all .elc files matching CI cleanup step")
        (make-builder-candidate
-        :name "ci-docker-tests"
-        :command "emacsclient --eval '(builder-run-ci-tests-docker)'"
-        :directory root
-       (make-builder-candidate
         :name "startup-profile"
         :command "emacsclient --timeout 10 --eval '(builder-emacs-conf-startup-profile)'"
         :directory root
         :priority 0
         :annotation "profile init in a throwaway daemon (async; report in *builder-startup-profile*)")
+       (make-builder-candidate
+        :name "ci-docker-tests"
+        :command "emacsclient --eval '(builder-run-ci-tests-docker)'"
+        :directory root
         :priority 0
         :annotation "run CI test suite in silex/emacs:30.2-ci docker container"))))
 

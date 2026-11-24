@@ -3,7 +3,6 @@
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (f "0.20.0") (xtdlib "0.1.0"))
 ;; Keywords: tools, lisp, elpa
 
 ;; This file is not part of GNU Emacs.
@@ -39,6 +38,7 @@
 (defvar byte-compile-warnings)
 (defvar checkdoc-force-docstrings-flag)
 (defvar checkdoc-spellcheck-documentation-flag)
+(defvar checkdoc-diagnostic-buffer)
 
 (defgroup builder-elisp nil
   "Emacs Lisp development and package tools for builder."
@@ -70,12 +70,14 @@ Omitted warnings: `free-vars', `docstrings-wide'."
   :group 'builder-elisp)
 
 (defcustom builder-elisp-checkdoc-force-docstrings-flag nil
-  "Value of `checkdoc-force-docstrings-flag' configured by `builder-elisp-mode'."
+  "Non-nil means `builder-elisp-mode' enables forced docstrings in checkdoc.
+The value is used for `checkdoc-force-docstrings-flag'."
   :type 'boolean
   :group 'builder-elisp)
 
 (defcustom builder-elisp-checkdoc-spellcheck-documentation-flag t
-  "Value of `checkdoc-spellcheck-documentation-flag' in `builder-elisp-mode'."
+  "Non-nil means `builder-elisp-mode' enables checkdoc spellchecking.
+The value is used for `checkdoc-spellcheck-documentation-flag'."
   :type 'boolean
   :group 'builder-elisp)
 
@@ -145,7 +147,8 @@ Omitted warnings: `free-vars', `docstrings-wide'."
 
 ;;;###autoload
 (define-minor-mode builder-elisp-mode
-  "Buffer-local mode managing byte-compile warnings, checkdoc, and ERT settings for Elisp."
+  "Buffer-local mode managing Elisp development settings.
+This covers byte-compile warnings, checkdoc, and ERT settings."
   :lighter " b-elisp"
   :keymap builder-elisp-mode-map
   :group 'builder-elisp
@@ -229,7 +232,9 @@ returning a deduplicated list of existing directories or files."
                           raw-paths))))
 
 (defun builder-elisp-package-directories (root &optional name)
-  "Return existing package directories for ROOT resolved by `builder-elisp-package-path-resolvers'."
+  "Return existing package directories for ROOT.
+Paths are resolved by `builder-elisp-package-path-resolvers'.
+NAME is passed through to the resolvers."
   (seq-filter #'file-directory-p (builder-elisp-package-resolve-paths root name)))
 
 (defun builder-elisp-package--main-file (root)
@@ -322,6 +327,7 @@ byte-compiled as ordinary sources."
 
 (defun builder-elisp-package--read-pkg-deps (pkg-file)
   "Return dep symbols from a multi-file package's <NAME>-pkg.el descriptor.
+PKG-FILE is the path to the descriptor.
 Reads the `define-package' form's fourth argument (the requires list).
 The pseudo-package `emacs' is omitted."
   (with-temp-buffer
@@ -339,7 +345,7 @@ The pseudo-package `emacs' is omitted."
   "Return list of dep package symbols for the package at FILE-OR-ROOT.
 If FILE-OR-ROOT is a directory, prefer <NAME>-pkg.el's `define-package'
 requires and fall back to the main file's `Package-Requires' header.
-If it is a file, read `Package-Requires' from that file. The pseudo-
+If it is a file, read `Package-Requires' from that file.  The pseudo-
 package `emacs' is omitted, since it is not installable."
   (require 'lisp-mnt)
   (cond
@@ -358,17 +364,18 @@ package `emacs' is omitted, since it is not installable."
 (defun builder-elisp-package--require-deps (deps)
   "Require each symbol in DEPS, signaling a `user-error' if any cannot load.
 Use this from contexts that assume the user's `load-path' already provides them
-\(direct M-x invocation, or batch with `-L' flags pointing into ~/.emacs.d/elpa)."
+\(direct interactive invocation, or batch with `-L' flags pointing into the
+elpa directory)."
   (seq-do (lambda (it)
             (unless (require it nil t)
-              (user-error "elisp-package dependency not on load-path: %s" it)))
+              (user-error "Elisp-package dependency not on load-path: %s" it)))
           deps))
 
 ;;;###autoload
 (defun builder-elisp-package-test ()
-  "Run ert tests for the elisp package at `approximate-project-root`.
+  "Run ert tests for the elisp package at `approximate-project-root'.
 Loads package sources and any test/test-*.el or test/*-test.el files,
-then runs ert. In batch mode exits with the test status; otherwise
+then runs ert.  In batch mode exits with the test status; otherwise
 opens the *ert* selector."
   (interactive)
   (require 'ert)
@@ -449,7 +456,7 @@ DESCRIPTION appears in the `user-error' raised when nothing matches."
   "Run every currently loaded ert test whose name starts with PREFIX.
 PREFIX is read via `annotated-completing-read', offering every prefix
 shared by two or more loaded test names (see `builder--ert-known-prefixes')
-as a suggestion, annotated with its match count. Any string works —
+as a suggestion, annotated with its match count.  Any string works —
 matching is a plain `string-prefix-p' test, not restricted to what's listed."
   (interactive
    (list (annotated-completing-read
@@ -538,7 +545,8 @@ FILE-OR-BUFFER is a file path or live buffer.  Returns a list of error strings."
     (nreverse errors)))
 
 (defun builder-elisp-check-docstrings (file-or-buffer &optional max-col)
-  "Check docstrings in FILE-OR-BUFFER for width violations exceeding MAX-COL (default 80).
+  "Check docstrings in FILE-OR-BUFFER for width violations.
+Width violations are lines exceeding MAX-COL (default 80).
 Checks first lines of all definitions and all lines of `defcustom'.
 Returns a list of error strings."
   (let ((limit (or max-col 80))
@@ -571,7 +579,8 @@ Returns a list of error strings."
     (nreverse errors)))
 
 (defun builder-elisp-check-ci-workflows (root)
-  "Check that ROOT's CI workflows opt into ELPAish if ELPAish packages are required.
+  "Check that ROOT's CI workflows opt into ELPAish when required.
+This applies if ELPAish packages are required.
 Returns a list of error strings."
   (let* ((deps (builder-elisp-package--read-deps root))
          (elpaish-deps (seq-filter (lambda (dep) (memq dep builder-elisp-elpaish-packages)) deps))
@@ -623,7 +632,8 @@ and `builder-elisp-check-package'."
 ;;;###autoload
 (defun builder-elisp-package-preflight (&optional root)
   "Run preflight validation on the package at ROOT (or project root).
-Validates CI workflow configurations, file-level static checks, and byte-compilation.
+Validates CI workflow configurations, file-level static checks, and
+byte-compilation.
 Returns t if all checks pass, nil otherwise."
   (interactive)
   (pcase-let* ((`(,pkg-root ,name ,_main) (builder-elisp-package--resolve root t))
@@ -739,17 +749,17 @@ In batch mode exits with status 1 if any file fails linting or compilation."
   "Build an installable .tar via `package-build' for the elisp package at point.
 The recipe is generated at build time and uses a file:// URL pointing at the
 local repository, so the package contents reflect HEAD; uncommitted changes
-are not included. The tarball lands in <root>/build/packages/."
+are not included.  The tarball lands in <root>/build/packages/."
   (interactive)
   (unless (and (require 'package-build nil t)
                (require 'package-recipe nil t))
-    (user-error "package-build is required to build package archives"))
+    (user-error "Package-build is required to build package archives"))
   (pcase-let ((`(,root ,name ,_main-file) (builder-elisp-package--resolve nil t)))
     (unless (file-directory-p (f-join root ".git"))
-      (user-error "package build requires a git repository at %s" root))
+      (user-error "Package build requires a git repository at %s" root))
     (unless (zerop (call-process "git" nil nil nil "-C" root
                                  "rev-parse" "--verify" "HEAD"))
-      (user-error "package build requires at least one commit in %s" root))
+      (user-error "Package build requires at least one commit in %s" root))
     (let* ((build-root (f-join root "build"))
            (working-dir (f-join build-root "working"))
            (archive-dir (f-join build-root "packages"))
@@ -911,7 +921,7 @@ comparable with `package-alist' keys."
   "Return symbols declared via `use-package' in init source files.
 Walks .el files under DIR (defaults to `user-emacs-directory'/lisp) by
 `read'ing top-level forms and collecting the NAME from every
-(use-package NAME ...) form, including those nested inside top-level
+\(use-package NAME ...) form, including those nested inside top-level
 `progn'/`with-eval-after-load'/`eval-when-compile' wrappers.  Used to
 augment `builder-package-unused' so packages loaded via `:load-path'
 are not misclassified as unused."

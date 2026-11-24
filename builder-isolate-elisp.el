@@ -3,7 +3,6 @@
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (f "0.20.0"))
 ;; Keywords: tools, compilation
 
 ;; This file is not part of GNU Emacs.
@@ -21,8 +20,8 @@
 (require 'seq)
 (require 'subr-x)
 (require 'cl-lib)
-(require 'loadhist)
 (require 'f)
+(require 'loadhist)
 (require 'builder-core)
 (require 'builder-elisp)
 
@@ -82,12 +81,12 @@ Intended for CI invocations via --fg-daemon --eval, where `daemonp'
 returns t for the unnamed daemon.  Named persistent daemons (started via
 --daemon=NAME, e.g. the tychoish/work/hud sprites) and plain interactive
 sessions report other `daemonp' values, so this refuses to run --
-and, critically, refuses to call `kill-emacs' -- anywhere else. Never
+and, critically, refuses to call `kill-emacs' -- anywhere else.  Never
 invoke this against a live daemon via emacsclient; use
 `builder-emacs-conf-run-ci-tests-isolated' instead.
-Installs a TIMEOUT-second kill guard (default 240) before running."
+Installs a kill guard of TIMEOUT seconds (default 240) before running."
   (unless (eq (daemonp) t)
-    (user-error "builder-emacs-conf-run-ci-tests: refusing to run outside an unnamed --fg-daemon CI process (daemonp = %S); this function calls `kill-emacs' unconditionally" (daemonp)))
+    (user-error "Refusing to run `builder-emacs-conf-run-ci-tests' outside an unnamed --fg-daemon CI process (daemonp = %S); this function calls `kill-emacs' unconditionally" (daemonp)))
   (let ((test-dir (expand-file-name "test" user-emacs-directory))
         (noninteractive t)
         ;; Never block CI on a tree-sitter grammar install prompt (Emacs 31+).
@@ -114,7 +113,7 @@ Mirrors the invocation in .github/workflows/test.yml.  Safe to call via
 emacsclient against a live daemon: this only spawns the subprocess and
 returns, so `builder-emacs-conf-run-ci-tests' -- which calls
 `kill-emacs' unconditionally -- runs in its own disposable process
-instead of the caller. For agent skills via emacsclient:
+instead of the caller.  For agent skills via emacsclient:
   emacsclient --eval \\='(builder-emacs-conf-run-ci-tests-isolated)\\='"
   (interactive)
   (let* ((root (expand-file-name user-emacs-directory))
@@ -127,8 +126,9 @@ instead of the caller. For agent skills via emacsclient:
 
 ;;;###autoload
 (defun builder-emacs-conf-clean-elc (&optional directory)
-  "Delete all compiled .elc files under DIRECTORY (defaults to `user-emacs-directory`).
-Matching the CI cleanup step in .github/workflows/test.yml."
+  "Delete all compiled .elc files under DIRECTORY.
+DIRECTORY defaults to `user-emacs-directory'.  Matching the CI cleanup
+step in .github/workflows/test.yml."
   (interactive)
   (let* ((dir (expand-file-name (or directory user-emacs-directory)))
          (files (directory-files-recursively dir "\\.elc\\'")))
@@ -600,19 +600,22 @@ Populates BUFFER-NAME with the log/message half of the check's (SUCCESS-P
 ;; native compilation & vendored package maintenance
 
 (defcustom builder--native-compile-chunk-size 25
-  "Number of files to check for staleness per idle tick during incremental native compilation."
+  "Number of files to check for staleness per idle tick.
+Used during incremental native compilation."
   :type 'integer
   :group 'builder-isolate-elisp)
 
 (defcustom builder--native-compile-idle-delay 10
-  "Idle seconds between successive chunks in `builder--native-compile-process-queue'.
-Intentionally short (10s) for foreground incremental native-compilation queue
+  "Idle seconds between successive `native-compile' chunks.
+Chunks are processed by `builder--native-compile-process-queue'.
+Intentionally short (10s) for foreground incremental `native-compile' queue
 pickup after edits, unlike 300s+ background health-check sweeps."
   :type 'number
   :group 'builder-isolate-elisp)
 
 (defvar builder--native-compile-queue nil
-  "Remaining .el files still to be checked/compiled by `builder--native-compile-process-queue'.")
+  "Remaining .el files still to be checked/compiled.
+The queue is consumed by `builder--native-compile-process-queue'.")
 
 (defvar builder--native-compile-idle-timer nil
   "Idle timer driving `builder--native-compile-process-queue'.")
@@ -670,10 +673,10 @@ Cancels itself and prunes the eln cache once the queue drains."
 
 ;;;###autoload
 (defun builder-emacs-conf-native-compile-all ()
-  "Incrementally native-compile stale .el files in configuration and packages.
+  "Incrementally `native-compile' stale .el files in configuration and packages.
 Collects candidate files, then hands them to
 `builder--native-compile-process-queue' to work through in bounded,
-staleness-checked chunks on an idle timer. Runs once on an idle
+staleness-checked chunks on an idle timer.  Runs once on an idle
 timer after startup; also callable interactively for a fresh sweep."
   (interactive)
   (if (not (or (string-match "NATIVE_COMP" system-configuration-features)
@@ -704,10 +707,11 @@ TIMEOUT is the maximum number of seconds to wait (defaults to 300)."
 
 ;;;###autoload
 (defun builder-emacs-conf-recompile-all (&optional force wait)
-  "Byte-recompile user configuration and native-compile all stale files.
+  "Byte-recompile user configuration and `native-compile' all stale files.
 When FORCE is non-nil (with prefix argument `\\[universal-argument]`),
 force recompilation of all files even if `.elc' is up to date.
-When WAIT is non-nil (with double prefix argument `\\[universal-argument] \\[universal-argument]`),
+When WAIT is non-nil (with double prefix argument
+`\\[universal-argument] \\[universal-argument]`),
 block until all background native compilation subprocesses finish.
 Returns the list of files queued for native compilation."
   (interactive
@@ -745,8 +749,10 @@ Returns the list of files queued for native compilation."
 
 ;;;###autoload
 (defun builder-emacs-conf-byte-recompile-directory ()
-  "Recompile all `.el' files in `user-emacs-directory' and its direct subdirectories.
-With a prefix argument, force recompilation of every file regardless of timestamps.
+  "Recompile all `.el' files under `user-emacs-directory'.
+This covers its direct subdirectories as well.
+With a prefix argument, force recompilation of every file regardless of
+timestamps.
 Returns the list of files that were recompiled."
   (interactive)
   (let ((recompiled (thread-last (cons user-emacs-directory
@@ -768,12 +774,12 @@ Returns the list of files that were recompiled."
 (defun builder-emacs-conf-recompile-vendored-packages ()
   "Recompile all `.el' files in each `bootstrap-vendored-packages' checkout.
 Only scans each package's top-level directory, not its test/ subdirectory
-\(matching `builder-emacs-conf-byte-recompile-directory''s scope\). Useful
+\(matching `builder-emacs-conf-byte-recompile-directory''s scope\).  Useful
 after `git pull'-ing one of these external/ checkouts, since
 `bootstrap-package' only installs/compiles a package the first time it
 sees the checkout and never notices later updates on its own.
 With a prefix argument, force recompilation of every file regardless of
-timestamps. Returns the list of files that were recompiled."
+timestamps.  Returns the list of files that were recompiled."
   (interactive)
   (thread-last bootstrap-vendored-packages
                (seq-map (lambda (spec) (expand-file-name (nth 1 spec) user-emacs-directory)))
@@ -796,9 +802,9 @@ generates the autoloads file) the first time it sees a checkout — edits
 made to an `external/' package afterward, including new, renamed, or
 moved `;;;###autoload' cookies, never refresh that file on their own (see
 `builder-emacs-conf-recompile-vendored-packages' for the equivalent
-byte-compile staleness). Regeneration runs in a fresh batch Emacs
+byte-compile staleness).  Regeneration runs in a fresh batch Emacs
 subprocess so the result reflects only what is on disk, not whatever
-this session already has loaded. Returns the list of package symbols
+this session already has loaded.  Returns the list of package symbols
 regenerated."
   (interactive
    (list (unless current-prefix-arg
@@ -850,7 +856,8 @@ Maps each KIND symbol to (DO-FN . LOG-BUFFER-NAME).")
 (cl-defun builder-isolated-check (kind target &optional (transport 'subprocess) &key callback sprite)
   "Run isolated check of KIND on TARGET using TRANSPORT.
 KIND is one of `byte-compile', `load', or `package-test'.
-TRANSPORT is either `subprocess' (default) or `sprite'."
+TRANSPORT is either `subprocess' (default) or `sprite'.
+CALLBACK and SPRITE apply to the `sprite' transport only."
   (let ((spec (alist-get kind builder-isolated-check-kinds)))
     (unless spec
       (user-error "Unknown check kind: %s" kind))
@@ -881,9 +888,11 @@ plain `byte-compile-file'; see the isolation note above
 
 Returns t if compilation produced no errors; check `*Compile-Log*'
 regardless, since a missing `require' shows up there as a warning
-\(\"is not known to be defined\"), not necessarily a failure. For agent
+\(\"is not known to be defined\"), not necessarily a failure.  For agent
 skills via emacsclient:
-  emacsclient --eval \\='(builder-emacs-conf-byte-compile-and-delete-artifact \"lisp/foo.el\")\\='"
+  emacsclient --eval
+    \\='(builder-emacs-conf-byte-compile-and-delete-artifact
+      \"lisp/foo.el\")\\='"
   (builder-isolated-check 'byte-compile file 'subprocess))
 
 ;;;###autoload
@@ -896,7 +905,7 @@ missing `require' surfaces here as a real void-function/void-variable
 error instead of silently succeeding.
 
 Returns t if FILE loaded without error; any error is left in
-`*builder-load-check-log*'. For agent skills via emacsclient:
+`*builder-load-check-log*'.  For agent skills via emacsclient:
   emacsclient --eval \\='(builder-emacs-conf-load-check \"lisp/foo.el\")\\='"
   (builder-isolated-check 'load file 'subprocess))
 
@@ -908,8 +917,10 @@ ROOT defaults to `approximate-project-root'.  Use this instead of
 `builder-emacs-conf--do-byte-compile-check' for what that catches.
 
 Returns t if all tests passed; the ERT summary is left in
-`*builder-test-check-log*'. For agent skills via emacsclient:
-  emacsclient --eval \\='(builder-emacs-conf-elisp-package-test-isolated \"external/foo\")\\='"
+`*builder-test-check-log*'.  For agent skills via emacsclient:
+  emacsclient --eval
+    \\='(builder-emacs-conf-elisp-package-test-isolated
+      \"external/foo\")\\='"
   (builder-isolated-check 'package-test root 'subprocess))
 
 ;;;###autoload
@@ -919,7 +930,8 @@ FILE is resolved relative to `user-emacs-directory'.  Use to rule out
 this session's own state as the cause of a compile failure; see
 `builder-emacs-conf-sprite-eval'.  Returns a `sprite-direct-promise'
 immediately; without CALLBACK, pass/fail is reported with `alert' and
-the log is left in `*Compile-Log*' once the sprite responds."
+the log is left in `*Compile-Log*' once the sprite responds.
+SPRITE names the sprite instance to use."
   (interactive (list (buffer-file-name)))
   (builder-isolated-check 'byte-compile file 'sprite :sprite sprite :callback callback))
 
@@ -931,7 +943,7 @@ this session's own state as the cause of a load failure; see
 `builder-emacs-conf-sprite-eval'.  Returns a `sprite-direct-promise'
 immediately; without CALLBACK, pass/fail is reported with `alert' and
 the result is left in `*builder-load-check-log*' once the sprite
-responds."
+responds.  SPRITE names the sprite instance to use."
   (interactive (list (buffer-file-name)))
   (builder-isolated-check 'load file 'sprite :sprite sprite :callback callback))
 
@@ -943,7 +955,7 @@ session's own state as the cause of a test failure; see
 `builder-emacs-conf-sprite-eval'.  Returns a `sprite-direct-promise'
 immediately; without CALLBACK, pass/fail is reported with `alert' and
 the ERT summary is left in `*builder-test-check-log*' once the sprite
-responds."
+responds.  SPRITE names the sprite instance to use."
   (interactive (list (approximate-project-root)))
   (builder-isolated-check 'package-test root 'sprite :sprite sprite :callback callback))
 

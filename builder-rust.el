@@ -3,7 +3,6 @@
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (f "0.20.0") (xtdlib "0.1.0"))
 ;; Keywords: tools, rust, cargo
 
 ;; This file is not part of GNU Emacs.

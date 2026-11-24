@@ -3,7 +3,6 @@
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, compilation
 
 ;; This file is not part of GNU Emacs.
@@ -57,7 +56,8 @@
   :group 'builder-mode)
 
 (defcustom builder-mode-override-read-command t
-  "Whether `builder-mode' advises `compilation-read-command' to use builder selection."
+  "Non-nil means `builder-mode' advises the function `compilation-read-command'.
+The advice makes it use builder selection."
   :type 'boolean
   :group 'builder-mode)
 
@@ -142,7 +142,8 @@ COL and LEVEL are optional subexpressions."
   (push (list name regexp file line col level) compilation-error-regexp-alist-alist)
   (add-to-list 'compilation-error-regexp-alist name))
 
-(defalias 'compile-add-error-syntax #'builder-compile-add-error-syntax)
+(define-obsolete-function-alias 'compile-add-error-syntax
+  #'builder-compile-add-error-syntax "0.1.0")
 
 (defconst builder-default-error-syntax
   '((go-test . ("^[[:space:]]*\([[:alnum:]_./-]+\.go\):\([0-9]+\):" 1 2))
@@ -162,7 +163,8 @@ COL and LEVEL are optional subexpressions."
     (let ((inhibit-read-only t))
       (ansi-color-apply-on-region compilation-filter-start (point)))))
 
-(defalias 'colorize-compilation-buffer #'builder-colorize-compilation-buffer)
+(define-obsolete-function-alias 'colorize-compilation-buffer
+  #'builder-colorize-compilation-buffer "0.1.0")
 
 ;;;###autoload
 (defun builder-alert-after-finish-in-background (buf str)
@@ -174,11 +176,13 @@ STR is the termination status string."
                  (not (frame-focus-state))))
     (alert str :buffer buf :title (buffer-name buf))))
 
-(defalias 'alert-after-finish-in-background #'builder-alert-after-finish-in-background)
+(define-obsolete-function-alias 'alert-after-finish-in-background
+  #'builder-alert-after-finish-in-background "0.1.0")
 
 ;;;###autoload
 (defun builder-compilation-read-command (command)
-  "Advise `compilation-read-command' to prompt via builder candidate selection.
+  "Advise the function `compilation-read-command' to prompt via builder.
+The prompt uses builder candidate selection.
 COMMAND is the default compile command string."
   (require 'builder-core)
   (let* ((results (builder--read-command command))

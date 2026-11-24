@@ -3,7 +3,6 @@
 ;; Author: sam kleinman <sam@tychoish.com>
 ;; Maintainer: sam kleinman <sam@tychoish.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (f "0.20.0") (xtdlib "0.1.0") (annotated-completing-read "0.1.0"))
 ;; Keywords: tools, compilation
 
 ;; This file is not part of GNU Emacs.
@@ -31,11 +30,11 @@
 (declare-function alert "alert" (message &rest args))
 (declare-function async-start-process "async" (name program finish-func &rest program-args))
 (declare-function mode-buffers "xtd-project" (mode &optional buffer-list))
-(declare-function mode-buffers-for-project "xtd-project" (&key project mode))
+(declare-function mode-buffers-for-project "xtd-project" (&rest args))
 (defvar sprite-instance-id)
 
 (defun builder--instance-id ()
-  "Return `sprite-instance-id' when bound and non-nil, else `system-name'."
+  "Return `sprite-instance-id' when bound and non-nil, else function `system-name'."
   (or (bound-and-true-p sprite-instance-id) (system-name)))
 
 (defgroup builder nil
@@ -105,7 +104,8 @@ TARGET can be:
 When FORCE is non-nil, bypass minibuffer editing (`edit command =>`) and compile
 immediately.
 
-When EDIT is non-nil, force opening the minibuffer prompt even if TARGET was given.
+When EDIT is non-nil, force opening the minibuffer prompt even if TARGET
+was given.
 
 DIRECTORY specifies the working directory (defaults to `default-directory').
 BUFFER-NAME specifies an optional custom compilation buffer name."
@@ -194,6 +194,11 @@ BUFFER-NAME specifies an optional custom compilation buffer name."
     (buffer compile-result-message started-at &optional &key process-name program args send-when
      (alert-threshold 60)
      (notification-threshold 120))
+  "Report the result of a finished compilation in BUFFER.
+COMPILE-RESULT-MESSAGE is the termination string and STARTED-AT is when
+the compilation began.  PROCESS-NAME, PROGRAM and ARGS describe the run.
+ALERT-THRESHOLD and NOTIFICATION-THRESHOLD are durations in seconds;
+SEND-WHEN controls when a notification is sent."
   (let* ((end-at (current-time))
 	 (duration (time-subtract end-at started-at))
 	 (compile-result-message (string-trim compile-result-message))
@@ -235,6 +240,7 @@ BUFFER-NAME specifies an optional custom compilation buffer name."
 	 (setq buffer-read-only t)))))
 
 (defun builder-reset-finish-hooks ()
+  "Clear `compilation-finish-functions' in all compilation buffers."
   (interactive)
   (seq-do (lambda (it) (with-current-buffer it
 		 (setq-local compilation-finish-functions nil)))
@@ -256,6 +262,7 @@ BUFFER-NAME specifies an optional custom compilation buffer name."
 
 ;;;###autoload
 (defun builder-compile-project (&optional name command)
+  "Compile the current project, optionally with a given NAME and COMMAND."
   (let* ((project-root-directory (approximate-project-root))
 	 (start-at (current-time))
 	 ;; Step 1: select and confirm command
@@ -324,7 +331,7 @@ BUFFER-NAME specifies an optional custom compilation buffer name."
   "Change the directory for the current compilation buffer."
   (interactive)
   (unless (derived-mode-p 'compilation-mode)
-    (user-error "operation is only applicable for COMPILATION-MODE buffers"))
+    (user-error "Operation is only applicable for COMPILATION-MODE buffers"))
   (let ((directory (or (annotated-completing-read-directory
                         :candidates (seq-uniq
                                      (append (list compilation-directory default-directory)
@@ -370,6 +377,8 @@ priority from CANDIDATES, with key length as a final tiebreaker."
                       (and (= pa pb) (< (length a) (length b)))))))))))))
 
 (defun builder--read-command (&optional command table)
+  "Read a compilation command, preferring COMMAND, from candidates.
+TABLE supplies the candidates; otherwise they are generated."
   (let* ((candidates (or table
 			 (builder--get-candidates default-directory command)))
          (selection
@@ -395,7 +404,8 @@ priority from CANDIDATES, with key length as a final tiebreaker."
     (cons candidate candidates)))
 
 (cl-defun builder--project-compilation-buffers (&optional &key name (project (approximate-project-name)))
-  "Return a hash table of candidate compilation buffer names for PROJECT."
+  "Return a hash table of candidate compilation buffer names for PROJECT.
+NAME optionally restricts the buffers considered."
   (let ((buffer-table (map-into
                        (seq-map (lambda (it)
                                   (with-current-buffer it
@@ -477,17 +487,21 @@ priority from CANDIDATES, with key length as a final tiebreaker."
    :type function)
   (notification-threshold
    30
-   :documentation "if a command runs longer than this number of seconds, send a notification when the compile completes."
+   :documentation "if a command runs longer than this number of seconds,
+send a notification when the compile completes."
    :type integer)
   (priority
    2
-   :documentation "display sort priority: 0=current-file, 1=rerun, 2=project, 3=history (lower = higher priority)"
+   :documentation "display sort priority: 0=current-file, 1=rerun, 2=project,
+3=history (lower = higher priority)"
    :type integer))
 
 (defun builder--add-candidate (table candidate)
+  "Add CANDIDATE to TABLE, keyed by its name."
   (setf (map-elt table (builder-candidate-name candidate)) candidate))
 
 (defun builder--add-candidates (table candidates)
+  "Add each `builder-candidate' in CANDIDATES to TABLE."
   (seq-do (lambda (it) (builder--add-candidate table it))
 	   (seq-filter #'builder-candidate-p candidates)))
 
@@ -507,7 +521,8 @@ named-symbol generation, or mode-hook scoping."
   (add-hook 'builder-candidate-functions fn))
 
 (cl-defmacro builder-register-candidates (&key name (predicate t) (hooks nil) (no-hook nil) pipeline)
-  "Define a named candidate generator and register it on `builder-candidate-functions'.
+  "Define a named candidate generator and register it.
+The generator is added to `builder-candidate-functions'.
 NAME is used to derive the generated function symbol
 `builder-candidates-for-NAME'.  PREDICATE gates execution (default t).
 PIPELINE is an expression that evaluates to a list of `builder-candidate'
@@ -528,7 +543,7 @@ call `builder-add-candidates'."
 	(hook-registering-function-name (intern (format "builder-candidate-registrar-for-%s" name))))
     `(progn
        (defun ,symbol-name (project-root-directory project-name directories operation-table)
-	 ,(format "Candidate generator for `%s'; see `builder-register-candidates'." name)
+	 ,(format "Candidate generator for `%s'.\nSee `builder-register-candidates'." name)
 	 (ignore project-root-directory project-name directories operation-table)
 	 (when ,predicate
 	   (builder--add-candidates
@@ -555,7 +570,9 @@ call `builder-add-candidates'."
 (create-toggle-functions builder--cache-bypass)
 
 (defun builder--get-candidates (&optional directory command)
-  "Generate candidate compilation commands based on mode and directory structure."
+  "Generate candidate compilation commands based on mode and directory.
+DIRECTORY is the directory to inspect.  COMMAND is an optional command
+used to narrow the candidates."
   (when current-prefix-arg
     (builder--clear-candidate-cache))
 
@@ -593,10 +610,12 @@ call `builder-add-candidates'."
   builder--cached-candidates)
 
 (cl-defun builder--candidate-cache-p (&optional (buffer (current-buffer)))
+  "Return non-nil if BUFFER has cached candidates."
   (with-current-buffer buffer
     (when builder--cached-candidates t)))
 
 (defun builder-clear-all-caches ()
+  "Clear the candidate cache in every buffer that has one."
   (interactive)
   (seq-do #'builder--clear-candidate-cache
 	   (seq-filter #'builder--candidate-cache-p (buffer-list))))
@@ -604,7 +623,7 @@ call `builder-add-candidates'."
 (defun builder--after-load-alist-options ()
   "Return (NAME KEY ANNOTATION) tuples for `after-load-alist' entries.
 NAME is a display string for KEY (usually a feature symbol, sometimes
-a load-history regexp cons); ANNOTATION shows how many forms are
+a `load-history' regexp cons); ANNOTATION shows how many forms are
 queued for it."
   (seq-map (lambda (entry)
              (let* ((key (car entry))
@@ -639,12 +658,14 @@ restarting Emacs."
     (message "Removed `with-eval-after-load' entries for %S" key)))
 
 (cl-defun builder-clear-cache (&optional (buffer (current-buffer)))
+  "Clear the candidate cache of BUFFER, or of all buffers with a prefix."
   (interactive)
   (if current-prefix-arg
       (builder-clear-all-caches)
     (builder--clear-candidate-cache buffer)))
 
 (cl-defun builder--clear-candidate-cache (&optional (buffer (current-buffer)))
+  "Clear the cached candidates of BUFFER."
   (with-current-buffer buffer
     (setq-local builder--cached-candidates nil)))
 
