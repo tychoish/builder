@@ -29,6 +29,7 @@
 (declare-function async-start-process "async" (name program finish-func &rest program-args))
 (declare-function comp-el-to-eln-filename "comp-run" (filename &optional base-dir))
 (declare-function sprite-name "sprite-daemon")
+(defvar byte-compile-warnings)
 (defvar treesit-auto-install-grammar)
 (declare-function sprite-get-or-create-next "sprite-daemon")
 (declare-function sprite-direct-open "sprite-direct")
@@ -174,6 +175,7 @@ return a prior call's leftovers.  Never signals; safe in any process."
                 (match-string 0))
                t t))
             (write-region (point-min) (point-max) scratch nil 'silent))
+          (require 'bytecomp)
           (let* ((byte-compile-warnings (if (boundp 'builder-elisp-byte-compile-warnings)
                                             builder-elisp-byte-compile-warnings
                                           byte-compile-warnings))
@@ -244,33 +246,55 @@ name the way `*Compile-Log*' would be for an in-process compile; clears
       (insert (or output "")))))
 
 (defun builder-emacs-conf--builder-library-dir ()
-  "Return directory containing `builder' if resolvable on `load-path'."
-  (let ((lib (locate-library "builder")))
-    (and lib (file-name-directory lib))))
+  "Return directory containing `builder' if resolvable."
+  (when-let* ((lib (or (locate-library "builder")
+                       (and (featurep 'builder) (feature-file 'builder))
+                       (and (featurep 'builder-isolate-elisp)
+                            (feature-file 'builder-isolate-elisp)))))
+    (file-name-directory lib)))
+
+(defun builder-emacs-conf--emacs-program ()
+  "Return the path of the running Emacs executable, or \"emacs\"."
+  (let ((exe (expand-file-name invocation-name invocation-directory)))
+    (if (file-executable-p exe) exe "emacs")))
+
+(defun builder-emacs-conf--isolated-batch-args (result-file form)
+  "Return CLI arguments for an isolated `emacs --batch' check.
+RESULT-FILE receives the `prin1'-encoded value of FORM."
+  (let* ((lisp-dir (expand-file-name "lisp" user-emacs-directory))
+         (pkg-user-dir (and (boundp 'package-user-dir)
+                            package-user-dir
+                            (expand-file-name package-user-dir)))
+         (prepend-dirs (seq-filter #'identity
+                                   (list (when (file-directory-p lisp-dir) lisp-dir)
+                                         (builder-emacs-conf--builder-library-dir)))))
+    (append (list "--batch")
+            (when (and pkg-user-dir (file-directory-p pkg-user-dir))
+              (list "--eval" (format "(setq package-user-dir %S)" pkg-user-dir)
+                    "-f" "package-initialize"))
+            (list "--eval" (format "(setq load-path (delete-dups (append '%S '%S load-path)))"
+                                   prepend-dirs load-path)
+                  "--eval" "(require 'builder)"
+                  "--eval" (format "(with-temp-file %S (prin1 %S (current-buffer)))"
+                                   result-file form)))))
 
 ;;;; async.el transport -- throwaway `emacs --batch' subprocess
 
 (defun builder-emacs-conf--isolated-batch-eval (form)
   "Evaluate FORM in an isolated `emacs --batch' subprocess; return its value.
-The child has lisp/ on `load-path' and `builder' loaded, but none of the
-calling session's other packages, advice, or interactive state.  The
-return value crosses via a scratch result file, not stdout/stderr (which
-byte-compiler warnings also write to).  Returns (cons nil PROCESS-OUTPUT)
-if the child never wrote a result -- e.g. FORM signaled outside its own
-`condition-case', as the `do-*' checks above are careful not to."
+The child has lisp/ (when present) and the calling session's `load-path'
+with `builder' loaded, but none of the calling session's other loaded
+features, advice, or interactive state.  The return value crosses via a
+scratch result file, not stdout/stderr (which byte-compiler warnings also
+write to).  Returns (cons nil PROCESS-OUTPUT) if the child never wrote a
+result -- e.g. FORM signaled outside its own `condition-case', as the
+`do-*' checks above are careful not to."
   (let* ((result-file (make-temp-file "builder-isolated-result-"))
-         (buf (generate-new-buffer " *builder-isolated-batch*"))
-         (builder-dir (builder-emacs-conf--builder-library-dir)))
+         (buf (generate-new-buffer " *builder-isolated-batch*")))
     (unwind-protect
         (progn
-          (apply #'call-process "emacs" nil buf nil
-                 (append (list "--batch" "-L" (expand-file-name "lisp" user-emacs-directory))
-                         (when builder-dir (list "-L" builder-dir))
-                         (when (and (boundp 'package-user-dir) package-user-dir)
-                           (list "--eval" (format "(setq package-user-dir %S)" (expand-file-name package-user-dir))))
-                         (list "-f" "package-initialize" "--eval" "(require 'builder)"
-                               "--eval" (format "(with-temp-file %S (prin1 %S (current-buffer)))"
-                                               result-file form))))
+          (apply #'call-process (builder-emacs-conf--emacs-program) nil buf nil
+                 (builder-emacs-conf--isolated-batch-args result-file form))
           (builder-emacs-conf--read-result-file
            result-file (with-current-buffer buf (buffer-string))))
       (kill-buffer buf)
@@ -278,11 +302,6 @@ if the child never wrote a result -- e.g. FORM signaled outside its own
         (delete-file result-file)))))
 
 ;;;; Fast subprocess transport -- no `package-initialize'
-
-(defun builder-emacs-conf--emacs-program ()
-  "Return the path of the running Emacs executable, or \"emacs\"."
-  (let ((exe (expand-file-name invocation-name invocation-directory)))
-    (if (file-executable-p exe) exe "emacs")))
 
 (defun builder-emacs-conf--fast-batch-eval (form)
   "Evaluate FORM in a minimal `emacs -Q --batch' subprocess; return its value.
@@ -398,11 +417,9 @@ use, where blocking on the subprocess would freeze Emacs.  Reports
 pass/fail with `alert' and leaves the compile log in `*Compile-Log*',
 displaying that buffer on failure."
   (interactive (list (buffer-file-name)))
-  (let* ((expanded (expand-file-name file user-emacs-directory))
-         (result-file (make-temp-file "builder-isolated-result-"))
-         (builder-dir (builder-emacs-conf--builder-library-dir)))
+  (let ((result-file (make-temp-file "builder-isolated-result-")))
     (apply #'async-start-process
-           "builder-async-byte-compile" "emacs"
+           "builder-async-byte-compile" (builder-emacs-conf--emacs-program)
            (lambda (proc)
              (let* ((result (builder-emacs-conf--read-result-file
                              result-file (with-current-buffer (process-buffer proc) (buffer-string))))
@@ -415,13 +432,10 @@ displaying that buffer on failure."
                (if success
                    (kill-buffer (process-buffer proc))
                  (display-buffer "*Compile-Log*"))))
-           (append (list "--batch" "-L" (expand-file-name "lisp" user-emacs-directory))
-                   (when builder-dir (list "-L" builder-dir))
-                   (when (and (boundp 'package-user-dir) package-user-dir)
-                     (list "--eval" (format "(setq package-user-dir %S)" (expand-file-name package-user-dir))))
-                   (list "-f" "package-initialize" "--eval" "(require 'builder)"
-                         "--eval" (format "(with-temp-file %S (prin1 (builder-emacs-conf--do-byte-compile-check %S) (current-buffer)))"
-                                          result-file expanded))))))
+           (builder-emacs-conf--isolated-batch-args
+            result-file
+            (list 'builder-emacs-conf--do-byte-compile-check
+                  (expand-file-name file user-emacs-directory))))))
 
 ;;;; startup profiling -- throwaway daemon, never the live one
 

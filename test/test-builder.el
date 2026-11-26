@@ -690,6 +690,26 @@ file never requires fails to load instead of silently succeeding."
           (should-not (builder-emacs-conf-elisp-package-test-isolated root)))
       (delete-directory root t))))
 
+(ert-deftest builder-test/isolated-batch-eval-without-lisp-or-package-user-dir ()
+  "Isolated checks succeed when packages live only on `load-path'.
+Simulates preflight environments where `user-emacs-directory' has no
+lisp/ subdirectory and `package-user-dir' does not exist."
+  (let* ((empty-dir (file-name-as-directory (make-temp-file "builder-empty-emacs-" t)))
+         (user-emacs-directory empty-dir)
+         (package-user-dir (expand-file-name "elpa" empty-dir))
+         (clean-file (builder-test--write-temp-el "(defun builder-test-bare-env-fn () t)\n(provide 'builder-test-bare-env)\n"))
+         (bad-file (builder-test--write-temp-el "(builder-test-bare-undefined-fn)\n")))
+    (unwind-protect
+        (progn
+          (should (builder-emacs-conf-byte-compile-and-delete-artifact clean-file))
+          (should (builder-emacs-conf-load-check clean-file))
+          (should-not (builder-emacs-conf-load-check bad-file))
+          (should (string-match-p "builder-test-bare-undefined-fn"
+                                  (with-current-buffer "*builder-load-check-log*" (buffer-string)))))
+      (delete-file clean-file)
+      (delete-file bad-file)
+      (delete-directory empty-dir t))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; sprite transport (mocked -- no live daemon; see the `sprite' package's
 ;; own integration suite for real socket coverage of `sprite-direct')
