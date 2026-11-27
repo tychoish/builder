@@ -208,14 +208,28 @@ COMMAND is the default compile command string."
 (defcustom builder-mode-managed-settings
   '((compilation-scroll-output . t)
     (compilation-max-output-line-length . nil)
+    (display-buffer-alist
+     . ((builder--compilation-window-p (display-buffer-same-window))))
     (warning-suppress-log-types . ((frameset)))
     (warning-suppress-types . ((files missing-lexbind-cookie))))
-  "Alist of (SYMBOL . VALUE) settings managed globally by `builder-mode'."
+  "Alist of (SYMBOL . VALUE) settings managed globally by `builder-mode'.
+Display rules and warning suppressions are added to existing values.
+The default display rule reuses the selected compilation window for
+new compilation buffers.  Remove the `display-buffer-alist' entry to
+retain the usual window selection behavior."
   :type '(alist :key-type symbol :value-type sexp)
   :group 'builder-mode)
 
 (defvar builder-mode--saved-settings nil
   "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before enabling `builder-mode'.")
+
+(defun builder--compilation-window-p (buffer-name _action)
+  "Return non-nil when BUFFER-NAME can reuse the selected compilation window."
+  (when-let* ((buffer (get-buffer buffer-name)))
+    (and (with-current-buffer (window-buffer (selected-window))
+           (derived-mode-p 'compilation-mode))
+         (with-current-buffer buffer
+           (derived-mode-p 'compilation-mode)))))
 
 (defun builder-mode--apply-settings ()
   "Save previous values and apply `builder-mode-managed-settings'."
@@ -230,7 +244,7 @@ COMMAND is the default compile command string."
                                     (cons t (if (consp prior) (copy-sequence prior) prior))
                                   (cons nil nil)))
                       builder-mode--saved-settings))
-              (if (memq sym '(warning-suppress-log-types warning-suppress-types))
+              (if (memq sym '(display-buffer-alist warning-suppress-log-types warning-suppress-types))
                   (dolist (item val)
                     (add-to-list sym item))
                 (set sym val))))

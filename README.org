@@ -89,6 +89,13 @@ Available via [[https://tychoish.github.io/elpaish/snapshot/][ELPAish]]:
   - =d=: Run =builder-change-directory= to repoint the compilation buffer.
   - =C=: Recompile with standard prompt.
 
+When the selected window shows a compilation buffer, new compilation
+output reuses that window. From a source window, normal Emacs display
+rules apply. Builder adds this rule to =display-buffer-alist= while
+enabled and restores the previous rules when disabled. Remove the
+=display-buffer-alist= entry from =builder-mode-managed-settings= before
+enabling Builder to opt out.
+
 ** Coverage
 When =builder-mode= is active, =builder-coverage-modes= controls which major
 modes automatically enable =cov-mode=.  Its default is =(go-ts-mode)=; set it
