@@ -32,6 +32,7 @@
 (declare-function builder-elisp-mode "builder-elisp" (&optional arg))
 (declare-function builder-elisp-enable-ert-advice "builder-elisp" ())
 (declare-function builder-elisp-disable-ert-advice "builder-elisp" ())
+(declare-function cov--get-buffer-coverage "cov" ())
 (defvar builder-mode)
 (defvar builder-elisp-ert-prevent-focus)
 (defvar go-ts-mode-map)
@@ -115,6 +116,13 @@ Set to nil to disable automatic activation.  Changes take effect when
           (keymap-set go-ts-mode-map "C-c C-t c" (car builder--go-coverage-key-saved))
         (keymap-unset go-ts-mode-map "C-c C-t c")))
     (setq builder--go-coverage-key-saved nil)))
+
+(defun builder--ad-cov-set-overlays (orig-fn &rest args)
+  "Skip `cov-set-overlays' when non-interactive and no buffer coverage exists."
+  (when (or (called-interactively-p 'any)
+            (not (fboundp 'cov--get-buffer-coverage))
+            (cov--get-buffer-coverage))
+    (apply orig-fn args)))
 
 (defun builder--enable-cov ()
   "Configure coverage variables buffer-locally and enable `cov-mode'."
@@ -296,6 +304,7 @@ retain the usual window selection behavior."
           (advice-add 'compilation-read-command :override #'builder-compilation-read-command))
 
         ;; 7. Coverage hooks and Go command
+        (advice-add 'cov-set-overlays :around #'builder--ad-cov-set-overlays)
         (add-hook 'go-ts-mode-hook #'builder--install-go-coverage-key)
         (when (featurep 'go-ts-mode)
           (builder--install-go-coverage-key))
@@ -312,6 +321,7 @@ retain the usual window selection behavior."
             (builder-elisp-enable-ert-advice))))
 
     ;; Disabling mode
+    (advice-remove 'cov-set-overlays #'builder--ad-cov-set-overlays)
     (remove-hook 'go-ts-mode-hook #'builder--install-go-coverage-key)
     (when (boundp 'go-ts-mode-map)
       (builder--remove-go-coverage-key))

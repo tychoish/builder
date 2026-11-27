@@ -109,6 +109,37 @@
       (builder--enable-cov)
       (should (equal called 1)))))
 
+(ert-deftest builder-test/coverage-set-overlays-noop-without-data ()
+  "cov-set-overlays is a noop when no coverage data exists for the buffer."
+  (let ((builder-mode nil)
+        (builder-mode--saved-settings nil)
+        (builder-coverage-modes nil)
+        (builder-mode-enable-colorization nil)
+        (builder-mode-enable-finish-alerts nil)
+        (builder-mode-override-read-command nil)
+        (builder-mode-enable-language-modes nil)
+        (compilation-error-regexp-alist nil)
+        (compilation-error-regexp-alist-alist nil)
+        (go-ts-mode-hook nil)
+        (called 0)
+        (cov-lines nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'cov--get-buffer-coverage)
+                   (lambda () cov-lines))
+                  ((symbol-function 'cov-set-overlays)
+                   (lambda () (cl-incf called))))
+          (builder-mode 1)
+          (should (advice-member-p #'builder--ad-cov-set-overlays 'cov-set-overlays))
+          (cov-set-overlays)
+          (should (= called 0))
+          (setq cov-lines '((1 1)))
+          (cov-set-overlays)
+          (should (= called 1))
+          (builder-mode -1)
+          (should-not (advice-member-p #'builder--ad-cov-set-overlays 'cov-set-overlays)))
+      (when builder-mode
+        (builder-mode -1)))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; builder-candidate struct
 
